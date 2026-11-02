@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+    <meta name="theme-color" content="#101c25"/>
+    <title>StickSimulation | Living Frame</title>
+  </head>
+  <body>
+    <div id="app">
+      <main class="display-shell" aria-label="StickSimulation living pixel-art world">
+        <div class="frame">
+          <canvas id="world" width="256" height="256" aria-label="Autonomous wilderness diorama. Tap the forest, settlement, or water to suggest activities."></canvas>
+        </div>
+      </main>
+      <aside class="control-panel">
+        <p class="eyebrow">A LIVING FRAME</p>
+        <h1>StickSimulation</h1>
+        <p class="description">A miniature world that carries on with or without you.</p>
+        <div class="status">
+          <div><span>World age</span><strong id="age">Day 1</strong></div>
+          <div><span>Doing</span><strong id="activity">Waking up</strong></div>
+          <div><span>Supplies</span><strong id="resources">0 wood · 0 fish</strong></div>
+        </div>
+        <p id="event" role="status" aria-live="polite">The wilderness is quiet.</p>
+        <div class="actions">
+          <button id="motion" type="button">Enable motion</button>
+          <button id="reset" type="button" class="secondary">Restart world</button>
+        </div>
+        <p class="help">Touch the trees to suggest gathering, the river to suggest fishing, or the hut site to suggest building. On desktop, use ← and → to preview tilt.</p>
+      </aside>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
