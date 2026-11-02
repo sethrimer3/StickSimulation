@@ -18,7 +18,9 @@
 - [x] Save and capped offline catch-up.
 - [x] Stick Ranger-style Verlet body, physical walking and joint dragging.
 - [x] Pixel-art software renderer with per-pixel terrain and banded lighting.
-- [ ] Falling-sand elements (sand, water flow, fire, ...) on the terrain grid.
+- [x] Falling-sand elements: everything but the stickman, creatures and sky is a material (sand, water, fire, smoke, steam, ash, sawdust, wood, ...).
+- [x] Fire spreads, buildings can burn down and be rebuilt, trees regrow, rain falls as water.
+- [ ] More elements (lava, snow/ice, oil, plants, seeds) and seasons.
 - [ ] Improve construction stages.
 - [ ] Add a simple event log that persists.
 - [ ] Tune the simulation so it remains engaging when unattended.

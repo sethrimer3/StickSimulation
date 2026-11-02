@@ -171,6 +171,8 @@ export class StickBody {
   private collide(terrain: Terrain, i: number): void {
     const c = this.p[i];
     const start = this.prev[i];
+    // A joint already embedded (e.g. sand poured onto it) moves freely until it is out.
+    if (terrain.isSolid(start.x, start.y)) return;
     let dx = c.x - start.x;
     let dy = c.y - start.y;
     c.x = start.x;

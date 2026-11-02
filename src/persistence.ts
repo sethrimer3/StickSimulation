@@ -1,7 +1,10 @@
 import { createWorld, SAVE_VERSION, type World } from "./world";
 import { simulate } from "./simulation";
+import type { BuiltFlags } from "./structures";
+import type { Terrain } from "./terrain";
 
 const KEY = "stick-simulation-v1";
+const GRID_KEY = "stick-simulation-grid-v1";
 const MAX_OFFLINE_SECONDS = 12 * 60 * 60;
 
 interface SavedWorld {
@@ -58,7 +61,39 @@ export function saveWorld(world: World): void {
 export function clearSave(): void {
   try {
     localStorage.removeItem(KEY);
+    localStorage.removeItem(GRID_KEY);
   } catch {
     // Reset the in-memory world even if browser storage is unavailable.
+  }
+}
+
+interface SavedGrid {
+  cells: string;
+  built: BuiltFlags;
+}
+
+/** Restore the material grid. Returns the saved build flags, or null if none. */
+export function loadGrid(terrain: Terrain): BuiltFlags | null {
+  try {
+    const raw = localStorage.getItem(GRID_KEY);
+    if (!raw) return null;
+    const saved = JSON.parse(raw) as Partial<SavedGrid>;
+    if (typeof saved.cells !== "string" || !saved.built) return null;
+    if (!terrain.deserialize(saved.cells)) return null;
+    return {
+      campfire: saved.built.campfire === true,
+      hut: saved.built.hut === true,
+      fence: saved.built.fence === true
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function saveGrid(terrain: Terrain, built: BuiltFlags): void {
+  try {
+    localStorage.setItem(GRID_KEY, JSON.stringify({ cells: terrain.serialize(), built }));
+  } catch {
+    // Storage full or unavailable: the world just starts fresh next time.
   }
 }

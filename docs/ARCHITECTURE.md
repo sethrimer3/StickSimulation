@@ -60,14 +60,41 @@ The inhabitant's body uses the same scheme as Stick Ranger's player characters:
 
 The simulation (`World.characterX`, task) stays the persistent source of truth. `Actor` is presentation-level physics that walks the body toward the simulated position and teleports it after large offline jumps. Body state is not saved.
 
-## Terrain (`src/terrain.ts`)
+## Materials and falling sand (`src/materials.ts`, `src/terrain.ts`)
 
-A 256 × 256 per-pixel material grid (empty, dirt, grass, stone, sand, water). It is static for now and is the base for upcoming falling-sand elements.
+Everything in the world except the stickman, creatures (the monster) and sky/backdrop elements (sky, sun, stars, clouds, distant hills) is a material cell in a 256 × 256 grid. Each cell stores a material, a color shade (kept when a grain moves) and a life value (gas lifetime, or remaining burn time).
+
+| Kind | Materials | Behavior |
+| --- | --- | --- |
+| Static | Stone, Dirt, Grass, Wood (bark), Leaf, Plank, Thatch, Glass, Embers | Never move. Wood-type cells and grass can burn. |
+| Powder | Sand, Ash, Sawdust | Fall, slide diagonally into piles, sink through lighter liquids. Ash and sawdust float on water. |
+| Liquid | Water | Falls, then spreads sideways up to 4 cells. |
+| Gas | Fire, Smoke, Steam | Rise and drift, then expire. |
+
+- **Fire:** flames ignite neighbors by flammability. A burning cell throws flames, counts down its burn time, then becomes ash, dirt (grass) or empty. Water douses fire and turns to steam. The campfire's embers emit flames forever.
+- **Slow processes** run on 400 random cells per tick: grass spreads over exposed dirt, ash/sawdust decays, sunlit water evaporates.
+- **Water balance:** puddles on soil or wood soak in; the river is held at a constant level by a spring and overflow at the right edge; water running off the left edge leaves the world.
+- **Tilt** biases which way powders slide and liquids flow, so tipping the frame tips sand and water.
+- The stickman collides only with ground-like materials (stone, dirt, grass, sand, sawdust), so he walks past trees and through the hut doorway area, and is pushed up if buried.
+- The grid (material + shade) is run-length encoded into localStorage every 5 seconds (~125 KB).
+
+## Structures (`src/structures.ts`)
+
+Trees, the hut, the fence and the campfire are templates stamped into the grid. After that they are ordinary cells:
+
+- Construction tasks place cells bottom-up as the task progresses.
+- If over 65% of a building is gone (burnt or knocked away, not merely buried or flooded), the simulation loses it (`world.hut = false`, "The hut burned down!") and the inhabitant rebuilds it later. Damaged buildings are slowly repaired.
+- Burnt trees regrow from the roots up over about a minute.
+
+## Weather (`src/weather.ts`)
+
+Clouds are sky elements. About a third of them rain; every raindrop is a Water cell.
 
 ## Render layer
 
 - All drawing goes into a software framebuffer (`src/pixels.ts`): 1 px Bresenham lines, midpoint circles, dithered gradients. One `putImageData` per frame, so nothing is anti-aliased.
-- Night and campfire light are applied per pixel in quantized, Bayer-dithered bands.
+- Light comes from glowing cells (fire, embers, burning wood, lit windows), accumulated on an 8 px block grid and applied per pixel at night in quantized, Bayer-dithered bands.
+- Water, steam and smoke are drawn semi-transparent over the backdrop.
 - Canvas logical size: 256 × 256.
 - CSS scales the canvas while preserving a square aspect ratio.
 - Nearest-neighbor sampling for crisp pixel art.

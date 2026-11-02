@@ -1,11 +1,14 @@
 import "./style.css";
 import { Actor } from "./actor";
 import { MotionInput } from "./input";
-import { clearSave, loadWorld, saveWorld } from "./persistence";
+import { Material } from "./materials";
+import { clearSave, loadGrid, loadWorld, saveGrid, saveWorld } from "./persistence";
 import { render } from "./render";
 import { simulate, taskLabel } from "./simulation";
+import { Structures } from "./structures";
 import { Terrain } from "./terrain";
-import { createWorld, dayNumber, LOGICAL_SIZE, suggest } from "./world";
+import { Weather } from "./weather";
+import { createWorld, dayFraction, dayNumber, LOGICAL_SIZE, suggest } from "./world";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#world");
 const context = canvas?.getContext("2d", { alpha: false });
@@ -15,6 +18,7 @@ const resources = document.querySelector<HTMLElement>("#resources");
 const eventLabel = document.querySelector<HTMLElement>("#event");
 const motionButton = document.querySelector<HTMLButtonElement>("#motion");
 const resetButton = document.querySelector<HTMLButtonElement>("#reset");
+const elementButtons = document.querySelectorAll<HTMLButtonElement>("[data-element]");
 
 if (!canvas || !context || !age || !activity || !resources || !eventLabel || !motionButton || !resetButton) {
   throw new Error("Missing StickSimulation interface elements");
@@ -26,7 +30,15 @@ if (new URLSearchParams(window.location.search).has("frame")) {
 
 let world = loadWorld();
 const terrain = new Terrain();
+const structures = new Structures();
+const weather = new Weather();
+const savedBuilt = loadGrid(terrain);
+if (savedBuilt) structures.built = savedBuilt;
+else structures.stampAll(terrain, world);
 let actor = new Actor(world, terrain);
+/** Material poured by touch, or null for "suggest" mode. */
+let brush: Material | "erase" | null = null;
+let painting = false;
 let lastFrame = performance.now();
 const motion = new MotionInput();
 let keyboardTilt = 0;
@@ -49,6 +61,12 @@ function toLogical(event: PointerEvent): { x: number; y: number } {
   };
 }
 
+function paintAt(x: number, y: number): void {
+  if (brush === null) return;
+  if (brush === "erase") terrain.paint(x, y, 4, Material.Empty, true);
+  else terrain.paint(x, y, brush === Material.Fire ? 2 : 3, brush);
+}
+
 canvas.addEventListener("pointerdown", (event) => {
   const { x, y } = toLogical(event);
 
@@ -58,23 +76,41 @@ canvas.addEventListener("pointerdown", (event) => {
     return;
   }
 
+  if (brush !== null) {
+    painting = true;
+    canvas.setPointerCapture(event.pointerId);
+    paintAt(x, y);
+    return;
+  }
+
   if (x < 90 && y > 90) suggest(world, "gather");
   else if (x > 195 && y > 140) suggest(world, "fish");
-  else if (x >= 95 && x <= 190 && y > 115) suggest(world, "buildHut");
+  else if (x >= 110 && x <= 168 && y > 115) suggest(world, "buildHut");
 
   updateStatus();
 });
 
 canvas.addEventListener("pointermove", (event) => {
-  if (!actor.body.dragging) return;
   const { x, y } = toLogical(event);
-  actor.body.moveGrab(x, y);
+  if (actor.body.dragging) actor.body.moveGrab(x, y);
+  else if (painting) paintAt(x, y);
 });
 
-const releaseGrab = (): void => actor.body.release();
-canvas.addEventListener("pointerup", releaseGrab);
-canvas.addEventListener("pointercancel", releaseGrab);
-window.addEventListener("blur", releaseGrab);
+const releasePointer = (): void => {
+  actor.body.release();
+  painting = false;
+};
+canvas.addEventListener("pointerup", releasePointer);
+canvas.addEventListener("pointercancel", releasePointer);
+window.addEventListener("blur", releasePointer);
+
+elementButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    const value = button.dataset.element ?? "suggest";
+    brush = value === "suggest" ? null : value === "erase" ? "erase" : Material[value as keyof typeof Material];
+    elementButtons.forEach((b) => b.setAttribute("aria-pressed", String(b === button)));
+  });
+});
 
 motionButton.addEventListener("click", async () => {
   motionButton.textContent = await motion.enable();
@@ -84,6 +120,8 @@ resetButton.addEventListener("click", () => {
   if (!window.confirm("Restart this world? Saved progression will be lost.")) return;
   clearSave();
   world = createWorld();
+  terrain.generate();
+  structures.stampAll(terrain, world);
   actor = new Actor(world, terrain);
   lastUpdate = Date.now();
   updateStatus();
@@ -101,11 +139,15 @@ window.addEventListener("keyup", (event) => {
   }
 });
 
-window.addEventListener("pagehide", () => saveWorld(world));
+function saveAll(): void {
+  saveWorld(world);
+  saveGrid(terrain, structures.built);
+}
+window.addEventListener("pagehide", saveAll);
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) saveWorld(world);
+  if (document.hidden) saveAll();
 });
-window.setInterval(() => saveWorld(world), 5000);
+window.setInterval(saveAll, 5000);
 
 function loop(): void {
   const now = Date.now();
@@ -116,9 +158,16 @@ function loop(): void {
   const desiredTilt = Math.abs(keyboardTilt) > 0 ? keyboardTilt : motion.tilt;
   visualTilt += (desiredTilt - visualTilt) * 0.09;
   const frameNow = performance.now();
-  actor.update(world, (frameNow - lastFrame) / 1000);
+  const daylight = Math.max(0, Math.sin(dayFraction(world) * Math.PI * 2));
+  actor.update(world, (frameNow - lastFrame) / 1000, () => {
+    // One world tick: weather, falling sand, then buildings catch up.
+    weather.step(terrain);
+    terrain.step({ tilt: visualTilt, daylight });
+    const lost = structures.update(terrain, world);
+    if (lost) world.lastEvent = lost;
+  });
   lastFrame = frameNow;
-  render(context!, world, terrain, actor, visualTilt, now / 1000);
+  render(context!, world, terrain, weather, actor, visualTilt, now / 1000);
 
   if (now - lastStatus > 350) {
     updateStatus();

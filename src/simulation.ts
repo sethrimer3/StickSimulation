@@ -1,6 +1,6 @@
 import { DAY_SECONDS, type Task, type World } from "./world";
 
-const DURATION: Record<Task, number> = {
+export const DURATION: Record<Task, number> = {
   idle: 0,
   gather: 7,
   fish: 10,
@@ -15,14 +15,14 @@ const DURATION: Record<Task, number> = {
 
 export const DESTINATION: Record<Task, number> = {
   idle: 124,
-  gather: 52,
+  gather: 61,
   fish: 188,
-  eat: 124,
-  rest: 124,
-  buildCampfire: 119,
-  buildHut: 129,
-  buildFence: 128,
-  defend: 171,
+  eat: 113,
+  rest: 113,
+  buildCampfire: 113,
+  buildHut: 141,
+  buildFence: 163,
+  defend: 178,
   wander: 151
 };
 

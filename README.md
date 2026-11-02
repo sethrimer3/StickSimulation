@@ -27,7 +27,8 @@ No display model or sensor has been selected or purchased. Browser device-orient
 - Logical rendering resolution: **256 × 256** (1:1 aspect ratio), nearest-neighbor scaling.
 - Fixed-step simulation loop, separated from drawing.
 - Stick Ranger-style Verlet stickman (11 points, upright-gravity trick, knee-kick walking) at 50 Hz.
-- Software pixel framebuffer over a per-pixel material grid (groundwork for falling-sand elements).
+- Falling-sand world: every pixel except the stickman, creatures and sky is a material (sand, water, fire, wood, ...), Powder Toy style.
+- Software pixel framebuffer with light from burning/glowing cells.
 - Local storage saves, including bounded offline catch-up.
 - Pointer/touch events and optional browser orientation input.
 
@@ -50,11 +51,12 @@ Node.js 20.19+ or 22.12+ is recommended for the chosen Vite major version. The d
 ## Prototype controls
 
 - **Drag the stickman:** Grab any joint and fling it; it gets back up on its own.
+- **Element buttons (side panel):** Pick Sand, Water, Fire, Sawdust, Stone, Wood or Erase, then touch/drag on the world to pour it. *Suggest* returns to task suggestions.
 - **Tap a tree:** Suggest gathering wood.
 - **Tap the water:** Suggest fishing.
 - **Tap near the settlement:** Suggest building (when enough resources exist).
 - **Motion button:** Request browser orientation access (where supported) and apply subtle parallax. This is *not* yet Raspberry Pi IMU support.
-- **Keyboard left/right:** Preview tilt parallax on a desktop.
+- **Keyboard left/right:** Preview tilt on a desktop (parallax plus sideways sand and water).
 - **Reset button:** Clear local progress after confirmation.
 
 The prototype uses deliberately accelerated task durations to demonstrate the loop. These are not final idle-game progression rates.

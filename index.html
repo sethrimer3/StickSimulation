@@ -23,11 +23,21 @@
           <div><span>Supplies</span><strong id="resources">0 wood · 0 fish</strong></div>
         </div>
         <p id="event" role="status" aria-live="polite">The wilderness is quiet.</p>
+        <div class="elements" role="group" aria-label="Touch tool">
+          <button type="button" data-element="suggest" aria-pressed="true">Suggest</button>
+          <button type="button" data-element="Sand" aria-pressed="false">Sand</button>
+          <button type="button" data-element="Water" aria-pressed="false">Water</button>
+          <button type="button" data-element="Fire" aria-pressed="false">Fire</button>
+          <button type="button" data-element="Sawdust" aria-pressed="false">Sawdust</button>
+          <button type="button" data-element="Stone" aria-pressed="false">Stone</button>
+          <button type="button" data-element="Plank" aria-pressed="false">Wood</button>
+          <button type="button" data-element="erase" aria-pressed="false">Erase</button>
+        </div>
         <div class="actions">
           <button id="motion" type="button">Enable motion</button>
           <button id="reset" type="button" class="secondary">Restart world</button>
         </div>
-        <p class="help">Touch the trees to suggest gathering, the river to suggest fishing, or the hut site to suggest building. On desktop, use ← and → to preview tilt.</p>
+        <p class="help">In Suggest mode, touch the trees to suggest gathering, the river to suggest fishing, or the hut site to suggest building. Pick an element to pour it into the world instead. Drag the stickman to fling him. Tilting (← and → on desktop) tips sand and water sideways.</p>
       </aside>
     </div>
     <script type="module" src="/src/main.ts"></script>
