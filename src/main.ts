@@ -30,10 +30,10 @@ let lastUpdate = Date.now();
 let lastStatus = 0;
 
 function updateStatus(): void {
-  age.textContent = `Day ${dayNumber(world)}`;
-  activity.textContent = taskLabel(world.task);
-  resources.textContent = `${world.wood} wood · ${world.fish} fish`;
-  eventLabel.textContent = world.lastEvent;
+  age!.textContent = `Day ${dayNumber(world)}`;
+  activity!.textContent = taskLabel(world.task);
+  resources!.textContent = `${world.wood} wood · ${world.fish} fish`;
+  eventLabel!.textContent = world.lastEvent;
 }
 
 canvas.addEventListener("pointerdown", (event) => {
