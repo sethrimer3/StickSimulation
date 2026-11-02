@@ -4,7 +4,15 @@
 
 A freestanding, square, **touchscreen** picture frame with an **accelerometer** contains an autonomous, persistent stick-figure wilderness simulation. The experience is primarily to **watch a small world evolve**, with optional interaction. Its intended role is ambient, amusing, and visually interesting in an office.
 
-A single inhabitant begins with a primitive camp. Over time they fish, gather resources, construct a hut, fight monsters, improve tools and defenses, and eventually build more elaborate settlements such as a castle.
+A few settlers begin at a campfire in one large side-view world. Over time they mine, fell trees, build homes and a library, research better blueprints and tools, and grow into a village. The camera follows one stickman at a time; the player can switch who is followed or pan around.
+
+### Decisions made (November 2026)
+
+- **Bodies:** Stick Ranger's stickman physics, rendered as pixel art.
+- **World:** one giant Terraria-style world of falling-sand materials (Powder Toy style). Only stickmen and the sky are not materials.
+- **Buildings:** hollow, with back walls the stickmen don't collide with; a room counts by Terraria's rules (walls, floor, roof, back wall, entrance) and its furniture. No front walls are drawn, giving a dollhouse view. Floors are linked by ladders through platforms.
+- **Mine and library:** versions of the Tower Defense Mine (gathering resources) and Library with its alchemy lab (studying, and creating blueprints).
+- **People:** multiple settlers with roles; more arrive when there are free beds.
 
 ## Core fantasy
 
@@ -51,8 +59,7 @@ These are **ideas**, not implementation promises.
 
 ## Unresolved design decisions
 
-1. One persistent, potentially immortal protagonist vs. a multigenerational population.
-2. Fixed single screen vs. larger world revealed through camera panning.
+1. Whether settlers age, die or have generations.
 3. How much agency touch should have: suggestion, direct command, or mixed mode.
 4. How quickly a hut, village and castle should appear in real-world time.
 5. Whether failure destroys structures permanently or triggers recovery arcs.

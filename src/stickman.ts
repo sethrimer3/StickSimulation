@@ -55,7 +55,11 @@ export interface BodyControl {
   targetX: number | null;
   /** Lie down as a limp ragdoll (resting). */
   relaxed: boolean;
+  /** Climb a ladder: hold onto column x and move the feet toward height y. */
+  climb?: { x: number; y: number } | null;
 }
+
+const CLIMB_SPEED = 0.55;
 
 export class StickBody {
   readonly p: Vec[] = [];
@@ -66,6 +70,8 @@ export class StickBody {
   /** Ticks since the last ground contact. */
   airborne = 0;
   private stepCooldown = 0;
+  /** Feet height while climbing, or NaN when not on a ladder. */
+  private climbY = NaN;
   private dragJoint = -1;
   private readonly dragTarget: Vec = { x: 0, y: 0 };
 
@@ -84,11 +90,15 @@ export class StickBody {
     });
     this.airborne = 0;
     this.stepCooldown = 0;
+    this.climbY = NaN;
   }
 
   get feetX(): number { return (this.p[Joint.FootL].x + this.p[Joint.FootR].x) * 0.5; }
   get feetY(): number { return (this.p[Joint.FootL].y + this.p[Joint.FootR].y) * 0.5; }
   get dragging(): boolean { return this.dragJoint !== -1; }
+  get climbing(): boolean { return !Number.isNaN(this.climbY); }
+  /** Feet height on the ladder (NaN when not climbing). */
+  get climbFeet(): number { return this.climbY; }
 
   /** Verlet integration with per-point gravity. */
   private integrate(i: number, gravity: number): void {
@@ -188,7 +198,9 @@ export class StickBody {
     for (let s = 0; s < steps; s++) {
       const ny = c.y + dy;
       if (ny < terrain.height) {
-        if (terrain.isSolid(c.x, ny)) {
+        // One-way platforms only stop a point falling onto them from above.
+        const landing = dy > 0 && start.y <= Math.floor(ny) && terrain.isOneWay(c.x, ny);
+        if (landing || terrain.isSolid(c.x, ny)) {
           dx *= TANGENT_FRICTION;
           dy = -dy;
           this.contact |= 1;
@@ -209,7 +221,38 @@ export class StickBody {
     }
   }
 
+  /**
+   * Ladder climbing: the body is posed against the rungs, hands and feet
+   * alternating, while the feet move toward the target height.
+   */
+  private climbTick(target: { x: number; y: number }): void {
+    if (Number.isNaN(this.climbY)) this.climbY = this.feetY;
+    const dy = target.y - this.climbY;
+    this.climbY += Math.max(-CLIMB_SPEED, Math.min(CLIMB_SPEED, dy));
+    const fy = this.climbY;
+    const phase = Math.sin(fy * 0.9);
+    const a = phase * 1.8;
+    const pose: Array<[number, number]> = [
+      [0, -16.8], [0, -13.2], [0, -9.6], [-2, -15 - a], [2, -15 + a],
+      [-1.5, -18 - a], [1.5, -18 + a], [-2, -5 + a], [2, -5 - a], [-1.5, -0.6 + a * 0.6], [1.5, -0.6 - a * 0.6]
+    ];
+    for (let i = 0; i < this.p.length; i++) {
+      const pt = this.p[i];
+      pt.x += (target.x + pose[i][0] - pt.x) * 0.45;
+      pt.y += (fy + pose[i][1] - pt.y) * 0.45;
+      this.prev[i].x = pt.x;
+      this.prev[i].y = pt.y;
+    }
+    this.airborne = 0;
+    this.contact = 1;
+  }
+
   tick(terrain: Terrain, control: BodyControl): void {
+    if (control.climb && !this.dragging) {
+      this.climbTick(control.climb);
+      return;
+    }
+    this.climbY = NaN;
     const upright = !control.relaxed && this.airborne < AIRBORNE_GRACE;
     this.airborne++;
     for (let i = 0; i < this.p.length; i++) {

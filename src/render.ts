@@ -1,10 +1,12 @@
-import type { Actor } from "./actor";
-import { Material, MATERIALS } from "./materials";
-import { bayer, mix, PixelSurface, rgb, type Rgb } from "./pixels";
+import { WOODPILE_X, YARD_X, type Colony, type Settler } from "./colony";
+import { isBuiltWall, Material, MATERIALS, MATERIAL_LIST, WallKind, WALL_PALETTES } from "./materials";
+import { bayer, hash2, mix, PixelSurface, rgb, type Rgb } from "./pixels";
 import { BONES, Joint } from "./stickman";
 import type { Terrain } from "./terrain";
 import type { Weather } from "./weather";
-import { dayFraction, LOGICAL_SIZE, type World } from "./world";
+import { dayFraction, daylight, LOGICAL_SIZE } from "./world";
+
+const S = LOGICAL_SIZE;
 
 const C = {
   skyTop: rgb("#243c63"),
@@ -21,303 +23,478 @@ const C = {
   rainCloud: rgb("#8a96a0"),
   rainCloudShade: rgb("#6d7882"),
   fire: [rgb("#db863e"), rgb("#f0b85a"), rgb("#f0d47c"), rgb("#fff3c4")],
-  monster: rgb("#583c66"),
-  monsterLight: rgb("#795184"),
-  monsterEye: rgb("#f1b1a5"),
   stick: rgb("#15181d"),
   metal: rgb("#b8c5c8"),
   metalDark: rgb("#7e8b90"),
   handle: rgb("#7c5e3a"),
-  line: rgb("#d6d4ba"),
-  bobber: rgb("#d9524a")
+  book: [rgb("#a33b32"), rgb("#3a6aa0"), rgb("#3f8a4e"), rgb("#c9a33b"), rgb("#6a3f8a")],
+  shelfWood: rgb("#4e3722"),
+  shelfBack: rgb("#2a1d12"),
+  pillow: rgb("#e8e0d0"),
+  blanket: rgb("#b84a4a"),
+  blanketDark: rgb("#8a3434"),
+  bedFrame: rgb("#5a3f27"),
+  deskTop: rgb("#9e7648"),
+  deskLeg: rgb("#5a3f27"),
+  paper: rgb("#e8dcc0"),
+  iron: rgb("#3a3840"),
+  ironLight: rgb("#55525c"),
+  brew: [rgb("#5fc45a"), rgb("#8ae36a"), rgb("#3f9a4a")],
+  rail: rgb("#8a6a40"),
+  rung: rgb("#a07c4c"),
+  doorDark: rgb("#42302a"),
+  doorKnob: rgb("#d9b44a"),
+  log: rgb("#6d4c2e"),
+  logEnd: rgb("#c9a36b"),
+  marker: rgb("#f5d36a")
 };
 
-const STARS: Array<[number, number]> = [
-  [11, 13], [35, 26], [56, 9], [79, 33], [103, 15], [141, 22], [167, 10],
-  [198, 31], [224, 14], [246, 34], [21, 62], [95, 57], [158, 49], [231, 67]
-];
+const PALETTES = MATERIAL_LIST.map((m) => MATERIALS[m].palette);
+const GLOW = MATERIAL_LIST.map((m) => MATERIALS[m].glow);
+const FLAMMABLE = MATERIAL_LIST.map((m) => MATERIALS[m].flammability > 0);
+const BODY_SOLID = MATERIAL_LIST.map((m) => MATERIALS[m].bodySolid);
 
-const PALETTES = Object.values(MATERIALS).map((m) => m.palette);
-const GLOW = Object.values(MATERIALS).map((m) => m.glow);
-const FLAMMABLE = Object.values(MATERIALS).map((m) => m.flammability > 0);
+const surface = new PixelSurface(S, S);
+/** 1 where the pixel shows only sky/backdrop, which firelight doesn't touch. */
+const backdrop = new Uint8Array(S * S);
 
-const surface = new PixelSurface(LOGICAL_SIZE, LOGICAL_SIZE);
+export interface View {
+  colony: Colony;
+  terrain: Terrain;
+  weather: Weather;
+  /** World position of the view's top-left pixel. */
+  camX: number;
+  camY: number;
+  now: number;
+  followed: Settler | null;
+}
 
-// ---- sky & backdrop (not materials) ------------------------------------------
+// ---- backdrop --------------------------------------------------------------------
 
-function drawSky(s: PixelSurface, world: World, weather: Weather, tilt: number, night: number): void {
-  const gloom = weather.raining ? 1 : 0;
-  const top = mix(C.skyTop, C.rainSkyTop, gloom * 0.7);
-  const bottom = mix(C.skyBottom, C.rainSkyBottom, gloom * 0.7);
-  for (let y = 0; y < LOGICAL_SIZE; y++) {
-    const t = Math.min(1, y / 190);
-    for (let x = 0; x < LOGICAL_SIZE; x++) {
+function drawSky(s: PixelSurface, v: View, night: number): void {
+  const gloom = v.weather.rainingNear(v.camX + S / 2) ? 0.7 : 0;
+  const top = mix(C.skyTop, C.rainSkyTop, gloom);
+  const bottom = mix(C.skyBottom, C.rainSkyBottom, gloom);
+  // The gradient is tied to world height so it reads as altitude.
+  for (let y = 0; y < S; y++) {
+    const wy = v.camY + y;
+    const t = Math.max(0, Math.min(1, (wy - 20) / 190));
+    for (let x = 0; x < S; x++) {
       const band = Math.floor(t * 7 + bayer(x, y)) / 7;
-      s.color[y * LOGICAL_SIZE + x] = mix(top, bottom, band);
+      s.color[y * S + x] = mix(top, bottom, band);
     }
   }
   if (night > 0.38) {
-    const shift = Math.round(tilt * 2);
-    for (const [sx, sy] of STARS) {
-      s.set(sx + shift, sy, C.star);
-      if ((sx + sy) % 3 === 0) s.set(sx + shift + 1, sy, C.star);
+    for (let k = 0; k < 40; k++) {
+      const sx = Math.floor(hash2(k, 3) * S - v.camX * 0.05);
+      const sy = Math.floor(hash2(k, 4) * 140 - v.camY * 0.1);
+      if (sy >= 0 && sy < S) s.set(((sx % S) + S) % S, sy, C.star);
     }
   }
-  const f = dayFraction(world);
-  const sunX = 20 + f * 205 + Math.round(tilt * 2);
-  const sunY = 104 - Math.sin(f * Math.PI) * 72;
+  const f = dayFraction(v.colony.elapsed);
+  const sunX = 20 + f * 205;
+  const sunY = 104 - Math.sin(f * Math.PI) * 72 - (v.camY - 72) * 0.15;
   s.fillCircle(sunX + 6, sunY + 6, 6, C.sun);
   s.fillCircle(sunX + 5, sunY + 5, 3, C.sunCore);
 }
 
-function drawHills(s: PixelSurface, tilt: number): void {
-  const farShift = Math.round(tilt * 2);
-  const nearShift = Math.round(tilt * 4);
-  for (let x = 0; x < LOGICAL_SIZE; x++) {
-    const fx = x - farShift;
-    const far = 130 + Math.round(Math.sin(fx / 23) * 6 + Math.sin(fx / 9) * 2);
-    for (let y = far; y < 210; y++) s.set(x, y, C.hillFar);
-    const nx = x - nearShift;
-    const near = 150 + Math.round((Math.sin(nx / 31) * 9 + Math.sin(nx / 12) * 3) / 3) * 3;
-    for (let y = near; y < 215; y++) s.set(x, y, (y - near) < 1 ? mix(C.hillNear, C.hillFar, 0.5) : C.hillNear);
+function drawHills(s: PixelSurface, v: View): void {
+  for (let x = 0; x < S; x++) {
+    const fx = v.camX * 0.4 + x;
+    const far = 150 + Math.round(Math.sin(fx / 23) * 6 + Math.sin(fx / 9) * 2) - Math.round(v.camY * 0.6 - 43);
+    for (let y = Math.max(0, far); y < S; y++) s.color[y * S + x] = C.hillFar;
+    const nx = v.camX * 0.6 + x;
+    const near = 168 + Math.round((Math.sin(nx / 31) * 9 + Math.sin(nx / 12) * 3) / 3) * 3 - Math.round(v.camY * 0.75 - 54);
+    for (let y = Math.max(0, near); y < S; y++) s.color[y * S + x] = y === near ? mix(C.hillNear, C.hillFar, 0.5) : C.hillNear;
   }
 }
 
-function drawClouds(s: PixelSurface, weather: Weather): void {
-  for (const c of weather.clouds) {
+function drawClouds(s: PixelSurface, v: View): void {
+  for (const c of v.weather.clouds) {
     const raining = c.rain > 0;
     const body = raining ? C.rainCloud : C.cloud;
     const shade = raining ? C.rainCloudShade : C.cloudShade;
     const half = c.width / 2;
     for (let px = -half; px <= half; px++) {
-      const x = Math.round(c.x + px);
+      const x = Math.round(c.x + px - v.camX);
+      if (x < 0 || x >= S) continue;
       const edge = 1 - Math.abs(px) / half;
       const lumps = Math.sin(px * 0.35 + c.seed) * 2 + Math.sin(px * 0.13 + c.seed * 2) * 3;
       const h = Math.max(1, Math.round(edge * 7 + lumps * edge + 2));
-      for (let py = 0; py < h; py++) s.set(x, Math.round(c.y + 5 - py), py < 2 ? shade : body);
+      for (let py = 0; py < h; py++) s.set(x, Math.round(c.y + 5 - py - v.camY), py < 2 ? shade : body);
     }
   }
 }
 
-// ---- materials -------------------------------------------------------------
+// ---- cells ---------------------------------------------------------------------------
 
-function drawCells(s: PixelSurface, terrain: Terrain, now: number): void {
-  const { width, height, cells, shade, life } = terrain;
-  const flick = Math.floor(now * 12);
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const i = y * width + x;
-      const m = cells[i] as Material;
-      if (m === Material.Empty) continue;
-      const pal = PALETTES[m];
-      let c: Rgb = pal[shade[i]];
-      switch (m) {
-        case Material.Water: {
-          const top = y > 0 && cells[i - width] !== Material.Water;
-          const wave = Math.sin(x * 0.45 + now * 2.1 + Math.sin(y * 0.7) * 1.4);
-          c = y > 218 ? pal[1] : pal[0];
-          if (top && wave > -0.2) c = pal[2];
-          else if (wave > 0.93 && (y & 3) === 0) c = mix(pal[0], pal[2], 0.6);
-          // Slightly see-through.
-          c = mix(s.color[i], c, 0.82);
-          break;
-        }
-        case Material.Fire: {
-          const level = Math.min(3, Math.floor(life[i] / 6) + ((x + y + flick) & 1));
-          c = C.fire[level];
-          break;
-        }
-        case Material.Steam:
-        case Material.Smoke:
-          c = mix(s.color[i], c, m === Material.Steam ? 0.45 : 0.78);
-          break;
-        case Material.Hearth:
-          c = pal[(shade[i] + ((x * 3 + flick) % 4 === 0 ? 1 : 0)) & 3];
-          break;
-        default:
-          if (life[i] > 0 && FLAMMABLE[m]) {
-            // Burning: flicker between the material and flame colors.
-            c = mix(c, C.fire[(x + y + flick) & 3], 0.55 + ((x ^ flick) & 1) * 0.3);
-          }
-          break;
+function wallColor(w: WallKind, x: number, y: number): Rgb {
+  const pal = WALL_PALETTES[w];
+  switch (w) {
+    case WallKind.PlankWall:
+      return x % 6 === 0 ? pal[3] : pal[(hash2(Math.floor(x / 6), Math.floor(y / 9)) * 3) | 0];
+    case WallKind.BrickWall: {
+      const row = Math.floor(y / 4);
+      const mortar = y % 4 === 0 || (x + (row % 2) * 4) % 8 === 0;
+      return mortar ? pal[3] : pal[(hash2(Math.floor((x + (row % 2) * 4) / 8), row) * 2) | 0];
+    }
+    default:
+      return pal[(hash2(x >> 1, y >> 1) * 4) | 0];
+  }
+}
+
+function cellColor(t: Terrain, m: Material, x: number, y: number, i: number, now: number, flick: number): Rgb {
+  const pal = PALETTES[m];
+  const W = t.width;
+  const above = y > 0 ? t.cells[i - W] : 0;
+  const below = y < t.height - 1 ? t.cells[i + W] : 0;
+  const left = x > 0 ? t.cells[i - 1] : 0;
+  const right = x < W - 1 ? t.cells[i + 1] : 0;
+  switch (m) {
+    case Material.Bookshelf: {
+      if (left !== m || right !== m || above !== m || y % 5 === 0) return C.shelfWood;
+      if (hash2(x, Math.floor(y / 5)) < 0.08) return C.shelfBack;
+      return C.book[(hash2(x, 7 + Math.floor(y / 5)) * C.book.length) | 0];
+    }
+    case Material.Bed:
+      if (above !== m) {
+        const nearHead = t.cells[i - 1] !== m || t.cells[i - 2] !== m || t.cells[i - 3] !== m;
+        return nearHead ? C.pillow : C.blanket;
       }
-      s.color[i] = c;
+      if (below !== m || left !== m || right !== m) return C.bedFrame;
+      return C.blanketDark;
+    case Material.Desk:
+      if (above === Material.Desk) return C.deskLeg;
+      return left === m || right === m ? C.deskTop : C.paper;
+    case Material.Cauldron:
+      if (above !== m) return C.brew[(x + flick) % 3];
+      return left !== m || right !== m ? C.iron : C.ironLight;
+    case Material.Torch:
+      return C.fire[(x * 3 + y + flick) & 3];
+    case Material.Ladder:
+      return y % 4 === 0 ? C.rung : C.rail;
+    case Material.Platform:
+      return below !== m && below !== Material.Ladder ? pal[3] : pal[(x >> 2) & 1];
+    case Material.Door: {
+      if (left !== m && right !== m) return pal[0];
+      if (above !== m) return C.doorDark;
+      return (y % 7 === 3 && right !== m) ? C.doorKnob : pal[1];
+    }
+    case Material.Fire: {
+      const level = Math.min(3, Math.floor(t.life[i] / 6) + ((x + y + flick) & 1));
+      return C.fire[level];
+    }
+    case Material.Hearth:
+      return pal[(t.shade[i] + ((x * 3 + flick) % 4 === 0 ? 1 : 0)) & 3];
+    case Material.Grass:
+      return above === 0 && hash2(x, y) < 0.4 ? pal[2] : pal[t.shade[i]];
+    case Material.Water: {
+      const top = above !== Material.Water;
+      const wave = Math.sin(x * 0.45 + now * 2.1 + Math.sin(y * 0.7) * 1.4);
+      let c = top && wave > -0.2 ? pal[2] : pal[0];
+      if (!top && wave > 0.93 && (y & 3) === 0) c = mix(pal[0], pal[2], 0.6);
+      return c;
+    }
+    default: {
+      let c = pal[t.shade[i]];
+      if (t.life[i] > 0 && FLAMMABLE[m]) c = mix(c, C.fire[(x + y + flick) & 3], 0.55 + ((x ^ flick) & 1) * 0.3);
+      return c;
     }
   }
 }
 
-// ---- creatures ---------------------------------------------------------------
-
-function drawMonster(s: PixelSurface, terrain: Terrain, now: number): void {
-  const x = 192;
-  const ground = terrain.surfaceY(x + 2);
-  const bob = Math.round(Math.sin(now * 3));
-  s.rect(x - 7, ground - 21 + bob, 15, 21 - bob, C.monster);
-  s.rect(x - 9, ground - 29 + bob, 19, 12, C.monsterLight);
-  s.rect(x - 4, ground - 25 + bob, 3, 3, C.monsterEye);
-  s.rect(x + 4, ground - 25 + bob, 3, 3, C.monsterEye);
-  s.rect(x - 3, ground - 20 + bob, 8, 1, C.monster);
+function drawWorld(s: PixelSurface, v: View): void {
+  const t = v.terrain;
+  const { cells, walls } = t;
+  const flick = Math.floor(v.now * 12);
+  const cx = Math.floor(v.camX);
+  const cy = Math.floor(v.camY);
+  backdrop.fill(1);
+  for (let sy = 0; sy < S; sy++) {
+    const y = cy + sy;
+    if (y < 0 || y >= t.height) continue;
+    for (let sx = 0; sx < S; sx++) {
+      const x = cx + sx;
+      if (x < 0 || x >= t.width) continue;
+      const i = y * t.width + x;
+      const o = sy * S + sx;
+      const m = cells[i] as Material;
+      const w = walls[i] as WallKind;
+      if (w !== WallKind.None) { s.color[o] = wallColor(w, x, y); backdrop[o] = 0; }
+      if (m === Material.Empty) {
+        // Ladders are drawn three pixels wide: side rails over the cells beside them.
+        if ((x > 0 && cells[i - 1] === Material.Ladder) || (x < t.width - 1 && cells[i + 1] === Material.Ladder)) { s.color[o] = C.rail; backdrop[o] = 0; }
+        continue;
+      }
+      backdrop[o] = 0;
+      let c = cellColor(t, m, x, y, i, v.now, flick);
+      if (m === Material.Water) c = mix(s.color[o], c, 0.82);
+      else if (m === Material.Steam) c = mix(s.color[o], c, 0.45);
+      else if (m === Material.Smoke) c = mix(s.color[o], c, 0.78);
+      else if (m === Material.Ladder && y % 4 !== 0) c = s.color[o];
+      s.color[o] = c;
+    }
+  }
 }
 
-function drawTool(s: PixelSurface, actor: Actor, now: number): void {
-  const p = actor.body.p;
+// ---- piles, settlers --------------------------------------------------------------
+
+function drawPiles(s: PixelSurface, v: View): void {
+  const t = v.terrain;
+  const res = v.colony.resources;
+  const logs = Math.min(12, Math.floor(res.wood / 15));
+  const wx = WOODPILE_X - v.camX;
+  const wy = t.surfaceY(WOODPILE_X) - v.camY;
+  for (let k = 0; k < logs; k++) {
+    const row = Math.floor(k / 4);
+    const col = k % 4;
+    const lx = Math.round(wx - 10 + col * 5 + row * 2);
+    const ly = Math.round(wy - 3 - row * 3);
+    s.rect(lx, ly, 5, 3, C.log);
+    s.set(lx, ly + 1, C.logEnd);
+  }
+  const ore = Math.min(40, Math.floor((res.stone + res.copper * 3 + res.silver * 4 + res.gold * 5) / 6));
+  const yx = YARD_X - v.camX;
+  const yy = t.surfaceY(YARD_X) - v.camY;
+  const colors = [PALETTES[Material.Stone][0], PALETTES[Material.CopperOre][2], PALETTES[Material.SilverOre][2], PALETTES[Material.GoldOre][2]];
+  for (let k = 0; k < ore; k++) {
+    const h = Math.floor(Math.sqrt(k));
+    const dx = Math.round((hash2(k, 1) - 0.5) * (14 - h * 2));
+    const pick = res.gold >= 1 && k % 11 === 0 ? 3 : res.silver >= 1 && k % 7 === 0 ? 2 : res.copper >= 1 && k % 4 === 0 ? 1 : 0;
+    s.set(Math.round(yx + dx), Math.round(yy - 1 - h), colors[pick]);
+  }
+}
+
+function drawHeld(s: PixelSurface, st: Settler, ox: number, oy: number): void {
+  const p = st.body.p;
   const hand = p[Joint.HandR];
   const elbow = p[Joint.ElbowR];
   let dx = hand.x - elbow.x;
   let dy = hand.y - elbow.y;
   const len = Math.hypot(dx, dy) || 1;
-  dx /= len;
-  dy /= len;
-  const at = (k: number): [number, number] => [hand.x + dx * k, hand.y + dy * k];
-  switch (actor.tool) {
+  dx /= len; dy /= len;
+  const hx = hand.x - ox;
+  const hy = hand.y - oy;
+  const neck = p[Joint.Neck];
+  switch (st.holding) {
+    case "pick": {
+      const ex = hx + dx * 6; const ey = hy + dy * 6;
+      s.line(hx, hy, ex, ey, C.handle);
+      s.line(ex - dy * 2, ey + dx * 2, ex + dy * 2, ey - dx * 2, C.metalDark);
+      break;
+    }
     case "axe": {
-      const [ex, ey] = at(6);
-      s.line(hand.x, hand.y, ex, ey, C.handle);
+      const ex = hx + dx * 6; const ey = hy + dy * 6;
+      s.line(hx, hy, ex, ey, C.handle);
       s.rect(ex - 1, ey - 1, 3, 3, C.metal);
-      s.set(ex + 1, ey + 1, C.metalDark);
       break;
     }
     case "hammer": {
-      const [ex, ey] = at(5);
-      s.line(hand.x, hand.y, ex, ey, C.handle);
+      const ex = hx + dx * 5; const ey = hy + dy * 5;
+      s.line(hx, hy, ex, ey, C.handle);
       s.rect(ex - 1, ey - 1, 3, 2, C.metalDark);
       break;
     }
-    case "sword": {
-      const [gx, gy] = at(1);
-      const [ex, ey] = at(9);
-      s.line(gx, gy, ex, ey, C.metal);
-      s.line(gx - dy * 2, gy + dx * 2, gx + dy * 2, gy - dx * 2, C.handle);
+    case "book":
+      s.rect(hx - 1, hy - 2, 3, 3, C.book[st.name.length % C.book.length]);
       break;
-    }
-    case "rod": {
-      if (!actor.working) {
-        const [ex, ey] = at(8);
-        s.line(hand.x, hand.y, ex, ey, C.handle);
-        break;
-      }
-      const dir = actor.faceX > hand.x ? 1 : -1;
-      const tipX = hand.x + dir * 14;
-      const tipY = hand.y - 9;
-      s.line(hand.x, hand.y, tipX, tipY, C.handle);
-      const bobX = tipX + dir * 6;
-      const bobY = 203 + Math.round(Math.sin(now * 2.4));
-      s.line(tipX, tipY, bobX, bobY - 1, C.line);
-      s.set(bobX, bobY - 1, C.bobber);
+    case "flask":
+      s.set(hx, hy - 1, C.brew[0]);
+      s.set(hx, hy - 2, C.metal);
       break;
-    }
-    case "none":
+    case "log":
+      s.rect(neck.x - ox - 5, neck.y - oy - 2, 10, 2, C.log);
+      s.set(neck.x - ox - 5, neck.y - oy - 2, C.logEnd);
+      break;
+    case "ore":
+      s.rect(neck.x - ox - 2, neck.y - oy - 3, 4, 3, PALETTES[Material.CopperOre][1]);
+      break;
+    default:
       break;
   }
 }
 
-function drawStickman(s: PixelSurface, actor: Actor, now: number): void {
-  const p = actor.body.p;
-  for (const [a, b] of BONES) {
-    s.line(p[a].x, p[a].y - 0.5, p[b].x, p[b].y - 0.5, C.stick);
-  }
+function drawSettler(s: PixelSurface, st: Settler, v: View): void {
+  const p = st.body.p;
+  const ox = v.camX;
+  const oy = v.camY + 0.5;
+  // Remember the pixels under the figure so the ones it covers take firelight like the world.
+  let x0 = S, y0 = S, x1 = -1, y1 = -1;
+  for (const pt of p) { x0 = Math.min(x0, pt.x - ox); y0 = Math.min(y0, pt.y - oy); x1 = Math.max(x1, pt.x - ox); y1 = Math.max(y1, pt.y - oy); }
+  const bx0 = Math.max(0, Math.floor(x0 - 8));
+  const by0 = Math.max(0, Math.floor(y0 - 8));
+  const bx1 = Math.min(S - 1, Math.ceil(x1 + 8));
+  const by1 = Math.min(S - 1, Math.ceil(y1 + 2));
+  const before: number[] = [];
+  for (let y = by0; y <= by1; y++) for (let x = bx0; x <= bx1; x++) before.push(s.color[y * S + x]);
+  for (const [a, b] of BONES) s.line(p[a].x - ox, p[a].y - oy, p[b].x - ox, p[b].y - oy, C.stick);
   const head = p[Joint.Head];
   const neck = p[Joint.Neck];
   let hx = head.x - neck.x;
   let hy = head.y - neck.y;
   const hl = Math.hypot(hx, hy) || 1;
-  hx /= hl;
-  hy /= hl;
-  s.circle(head.x + hx * 0.8, head.y - 0.5 + hy * 0.8, 3, C.stick);
-  drawTool(s, actor, now);
+  hx /= hl; hy /= hl;
+  s.circle(head.x - ox + hx * 0.8, head.y - oy + hy * 0.8, 3, C.stick);
+  drawHeld(s, st, ox, oy);
+  let k = 0;
+  for (let y = by0; y <= by1; y++) for (let x = bx0; x <= bx1; x++) if (s.color[y * S + x] !== before[k++]) backdrop[y * S + x] = 0;
+  if (st === v.followed) {
+    const mx = Math.round(head.x - ox);
+    const my = Math.round(head.y - oy - 7);
+    s.set(mx, my + 1, C.marker);
+    s.rect(mx - 1, my, 3, 1, C.marker);
+  }
 }
 
-// ---- lighting ----------------------------------------------------------------
+// ---- lighting ----------------------------------------------------------------------
 
-const LIGHT_BLOCK = 8;
-const LB = LOGICAL_SIZE / LIGHT_BLOCK;
-const emit = new Float32Array(LB * LB);
-const lightMap = new Float32Array(LB * LB);
-const LIGHT_RADIUS = 5; // in blocks
+const BLOCK = 4;
+const MARGIN = 10;
+const LB = S / BLOCK + MARGIN * 2;
+const skyLight = new Float32Array(LB * LB);
+const emitLight = new Float32Array(LB * LB);
+const opaque = new Uint8Array(LB * LB);
+let lightOriginX = 0;
+let lightOriginY = 0;
 
-/** Glowing cells (fire, embers, burning wood, lit windows) light the night. */
-function computeLight(terrain: Terrain): void {
-  emit.fill(0);
-  const { width, cells, life } = terrain;
-  for (let i = 0; i < cells.length; i++) {
-    const m = cells[i];
-    if (m === Material.Empty) continue;
-    const g = GLOW[m] + (life[i] > 0 && FLAMMABLE[m] ? 0.8 : 0);
-    if (g <= 0) continue;
-    const x = i % width;
-    const y = (i / width) | 0;
-    emit[((y / LIGHT_BLOCK) | 0) * LB + ((x / LIGHT_BLOCK) | 0)] += g;
+/** Light spreads block by block from open sky and from glowing cells, losing strength in rock. */
+function computeLight(v: View): void {
+  const t = v.terrain;
+  const bx0 = Math.floor(v.camX / BLOCK) - MARGIN;
+  const by0 = Math.floor(v.camY / BLOCK) - MARGIN;
+  lightOriginX = bx0 * BLOCK;
+  lightOriginY = by0 * BLOCK;
+  for (let by = 0; by < LB; by++) {
+    for (let bx = 0; bx < LB; bx++) {
+      const k = by * LB + bx;
+      let solid = 0;
+      let sky = 0;
+      let glow = 0;
+      for (let yy = 0; yy < BLOCK; yy++) {
+        const y = (by0 + by) * BLOCK + yy;
+        for (let xx = 0; xx < BLOCK; xx++) {
+          const x = (bx0 + bx) * BLOCK + xx;
+          if (!t.inBounds(x, y)) { if (y < 0) sky++; else solid++; continue; }
+          const i = y * t.width + x;
+          const m = t.cells[i];
+          if (BODY_SOLID[m]) solid++;
+          else {
+            const w = t.walls[i] as WallKind;
+            sky += w === WallKind.None ? 1 : isBuiltWall(w) ? 0.45 : 0;
+          }
+          glow += GLOW[m] + (t.life[i] > 0 && FLAMMABLE[m] ? 0.8 : 0);
+        }
+      }
+      opaque[k] = solid > 10 ? 1 : 0;
+      skyLight[k] = sky / 16;
+      emitLight[k] = Math.min(1.6, glow * 0.9);
+    }
   }
+  for (const st of v.colony.settlers) {
+    const bx = Math.floor(st.body.feetX / BLOCK) - bx0;
+    const by = Math.floor((st.body.feetY - 8) / BLOCK) - by0;
+    if (bx >= 0 && by >= 0 && bx < LB && by < LB) emitLight[by * LB + bx] = Math.max(emitLight[by * LB + bx], 0.55);
+  }
+  spread(skyLight, 0.08, 0.24, 12);
+  spread(emitLight, 0.075, 0.22, 14);
+  blur(skyLight);
+  blur(emitLight);
+}
+
+const scratch = new Float32Array(LB * LB);
+/** A 3×3 box blur, so light pools are round rather than diamond-shaped. */
+function blur(field: Float32Array): void {
   for (let by = 0; by < LB; by++) {
     for (let bx = 0; bx < LB; bx++) {
       let sum = 0;
-      for (let oy = -LIGHT_RADIUS; oy <= LIGHT_RADIUS; oy++) {
-        const y = by + oy;
+      let n = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        const y = by + dy;
         if (y < 0 || y >= LB) continue;
-        for (let ox = -LIGHT_RADIUS; ox <= LIGHT_RADIUS; ox++) {
-          const x = bx + ox;
+        for (let dx = -1; dx <= 1; dx++) {
+          const x = bx + dx;
           if (x < 0 || x >= LB) continue;
-          const e = emit[y * LB + x];
-          if (e === 0) continue;
-          const d = Math.sqrt(ox * ox + oy * oy) / LIGHT_RADIUS;
-          if (d < 1) sum += e * (1 - d) * (1 - d);
+          sum += field[y * LB + x];
+          n++;
         }
       }
-      lightMap[by * LB + bx] = Math.min(1, sum / 14);
+      scratch[by * LB + bx] = sum / n;
+    }
+  }
+  field.set(scratch);
+}
+
+function spread(field: Float32Array, airLoss: number, rockLoss: number, passes: number): void {
+  for (let p = 0; p < passes; p++) {
+    const forward = p % 2 === 0;
+    for (let n = 0; n < LB * LB; n++) {
+      const k = forward ? n : LB * LB - 1 - n;
+      const bx = k % LB;
+      const by = (k / LB) | 0;
+      const loss = opaque[k] ? rockLoss : airLoss;
+      const diag = loss * 1.41;
+      let best = field[k];
+      if (bx > 0) best = Math.max(best, field[k - 1] - loss);
+      if (bx < LB - 1) best = Math.max(best, field[k + 1] - loss);
+      if (by > 0) {
+        best = Math.max(best, field[k - LB] - loss);
+        if (bx > 0) best = Math.max(best, field[k - LB - 1] - diag);
+        if (bx < LB - 1) best = Math.max(best, field[k - LB + 1] - diag);
+      }
+      if (by < LB - 1) {
+        best = Math.max(best, field[k + LB] - loss);
+        if (bx > 0) best = Math.max(best, field[k + LB - 1] - diag);
+        if (bx < LB - 1) best = Math.max(best, field[k + LB + 1] - diag);
+      }
+      field[k] = best;
     }
   }
 }
 
-function sampleLight(x: number, y: number): number {
-  // Bilinear between block centres, then banded with ordered dithering.
-  const fx = x / LIGHT_BLOCK - 0.5;
-  const fy = y / LIGHT_BLOCK - 0.5;
-  const x0 = Math.max(0, Math.min(LB - 1, Math.floor(fx)));
-  const y0 = Math.max(0, Math.min(LB - 1, Math.floor(fy)));
-  const x1 = Math.min(LB - 1, x0 + 1);
-  const y1 = Math.min(LB - 1, y0 + 1);
+function sample(field: Float32Array, wx: number, wy: number): number {
+  const fx = (wx - lightOriginX) / BLOCK - 0.5;
+  const fy = (wy - lightOriginY) / BLOCK - 0.5;
+  const x0 = Math.max(0, Math.min(LB - 2, Math.floor(fx)));
+  const y0 = Math.max(0, Math.min(LB - 2, Math.floor(fy)));
   const tx = Math.max(0, Math.min(1, fx - x0));
   const ty = Math.max(0, Math.min(1, fy - y0));
-  const a = lightMap[y0 * LB + x0] * (1 - tx) + lightMap[y0 * LB + x1] * tx;
-  const b = lightMap[y1 * LB + x0] * (1 - tx) + lightMap[y1 * LB + x1] * tx;
-  const v = a * (1 - ty) + b * ty;
-  return Math.floor(v * 4 + bayer(x, y) * 0.9) / 4;
+  const k = y0 * LB + x0;
+  const a = field[k] * (1 - tx) + field[k + 1] * tx;
+  const b = field[k + LB] * (1 - tx) + field[k + LB + 1] * tx;
+  return a * (1 - ty) + b * ty;
 }
 
-function makeLight(night: number) {
-  const mr = 1 - night * 0.62;
-  const mg = 1 - night * 0.55;
-  const mb = 1 - night * 0.36;
+function makeLight(v: View, sun: number) {
+  const day = 0.18 + sun * 0.82;
+  const sr = day * (1 - (1 - sun) * 0.25);
+  const sg = day * (1 - (1 - sun) * 0.18);
+  const sb = day;
   return (x: number, y: number, out: Float32Array): void => {
-    const k = night > 0.05 ? sampleLight(x, y) * night : 0;
-    out[0] = mr + (1 - mr) * k;
-    out[1] = mg + (1 - mg) * k * 0.75;
-    out[2] = mb + (1 - mb) * k * 0.3;
-    out[3] = k * 52;
+    const wx = v.camX + x;
+    const wy = v.camY + y;
+    const sky = backdrop[y * S + x] ? 1 : Math.min(1, sample(skyLight, wx, wy));
+    const emit = backdrop[y * S + x] ? 0 : Math.min(1, sample(emitLight, wx, wy));
+    const d = bayer(x, y) * 0.9;
+    const skyQ = Math.floor(sky * 6 + d) / 6;
+    const emitQ = Math.floor(emit * 5 + d) / 5;
+    // A little light everywhere, so the dug-out mine still reads as a cutaway.
+    const ambient = 0.2;
+    out[0] = Math.min(1.15, ambient + skyQ * sr + emitQ * 0.95);
+    out[1] = Math.min(1.1, ambient + skyQ * sg + emitQ * 0.75);
+    out[2] = Math.min(1.1, ambient * 1.3 + skyQ * sb + emitQ * 0.45);
+    out[3] = emitQ * 18;
   };
 }
 
-export function render(
-  ctx: CanvasRenderingContext2D,
-  world: World,
-  terrain: Terrain,
-  weather: Weather,
-  actor: Actor,
-  tilt: number,
-  nowSeconds: number
-): void {
+export function render(ctx: CanvasRenderingContext2D, v: View): void {
   const s = surface;
-  const daylight = Math.max(0, Math.sin(dayFraction(world) * Math.PI * 2));
-  const night = 1 - daylight;
-
-  drawSky(s, world, weather, tilt, night);
-  drawHills(s, tilt);
-  drawClouds(s, weather);
-  drawCells(s, terrain, nowSeconds);
-  if (world.monster) drawMonster(s, terrain, nowSeconds);
-  drawStickman(s, actor, nowSeconds);
-
-  computeLight(terrain);
-  s.present(ctx, makeLight(night));
+  const sun = daylight(v.colony.elapsed);
+  drawSky(s, v, 1 - sun);
+  drawHills(s, v);
+  drawClouds(s, v);
+  drawWorld(s, v);
+  drawPiles(s, v);
+  for (const st of v.colony.settlers) drawSettler(s, st, v);
+  computeLight(v);
+  s.present(ctx, makeLight(v, sun));
 }
-

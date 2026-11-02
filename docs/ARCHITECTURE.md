@@ -4,102 +4,102 @@
 
 A lightweight square pixel-art simulation that runs in a desktop browser today and can later use a kiosk browser on a Raspberry Pi-class computer.
 
-## Boundaries
+## Overview
 
 ```text
-Touch / mouse / keyboard       Browser device orientation       Future physical IMU
-           |                               |                            |
-           +-------------------------------+----------------------------+
-                                           |
-                                     Input adapters
-                                           |
-                                    Player suggestions
-                                           |
-             clock / offline catch-up -> Simulation <-> World state
-                                           |
-                         +-----------------+-------------------+
-                         |                                     |
-                    Renderer                              Persistence
-                         |                                     |
-                   Canvas 2D                             localStorage
-                         |                           (future: indexedDB/file)
-                    Square display
+Touch / mouse / keyboard      Browser orientation      Future physical IMU
+          |                           |                        |
+          +---------------------------+------------------------+
+                                      |
+                        Camera, pouring, role picks, research picks
+                                      |
+   fixed 50 Hz tick / catch-up -> Colony (settlers, jobs) <-> Terrain (cells, back walls)
+                                      |                          ^
+                                      |                          |
+                                   Weather (clouds drop water) --+
+                                      |
+                      +---------------+----------------+
+                      |                                |
+                 Renderer (camera view)           Persistence
+                      |                                |
+                 Canvas 2D 256 × 256              localStorage
 ```
 
-The simulation must **not** import DOM APIs or depend on the renderer. Input events should request or suggest actions; they should not directly manipulate construction or economy state.
+Everything under `Colony` and `Terrain` is DOM-free and steps at a fixed 50 Hz (Stick Ranger's rate), independent of the frame rate. `main.ts` owns the loop, the camera and the side panel.
 
-## Simulation
+## The world (`terrain.ts`, `materials.ts`)
 
-- Fixed world-time semantics, independent from refresh rate.
-- Autonomous task selection based on survival needs and construction milestones.
-- Task duration and resource costs are data and can later be balance-tuned.
-- Offline catch-up executes bounded world simulation after restart (initial cap: 12 hours).
-- A version number is stored with saves, allowing schema migrations.
-- Random encounters currently use a stored pseudo-random seed for repeatable future behavior given identical inputs.
+One large Terraria-style side view, **1024 × 512 pixels**, of which the frame shows 256 × 256 through a camera.
 
-The initial prototype uses short task durations to make its behavior observable in minutes. Final ambient pacing is undecided.
+- **Cells:** every pixel is a material (stone, dirt, grass, sand, water, steam, smoke, fire, ash, sawdust, wood, leaves, planks, thatch, glass, embers, bedrock, copper/silver/gold ore, brick, ladder, platform, door, bookshelf, desk, bed, cauldron, torch). Only the stickmen and the sky/backdrop (sky, sun, stars, clouds, distant hills) are not materials.
+- **Back walls:** a second layer behind the cells: natural dirt and stone walls underground, and the plank or brick walls the builders put up. Stickmen never touch back walls.
+- **Falling sand:** powders pile, liquids spread, gases rise, fire spreads by flammability and is doused by water. Only **16 × 16 chunks that are awake** are simulated (a change wakes its chunk and neighbours), so the big world stays cheap.
+- **Slow processes** run on random cells: grass spreads, ash and sawdust rot, sunlit puddles evaporate, pools drain into soil. A spring keeps the lake at its level.
+- **Generation:** smoothed hills (no column steps more than 2 px, so stickmen can walk them), a lake, forests either side of a flat colony site, dirt over stone, ore veins by depth (copper, then silver, then gold), winding caves, and bedrock.
+- Tilt biases which way sand and water slide.
 
-## Input layer
+## Stickmen (`stickman.ts`, `nav.ts`)
 
-- Pointer events work for both mouse and touchscreen.
-- Browser `deviceorientation` is a **development stand-in** for actual motion.
-- A physical Raspberry Pi IMU may require a small Python/Node companion service that sends readings to the browser over a local transport such as WebSocket. This bridge is **not yet implemented**.
-- Ask permission where browser platforms require it. The simulation must work if permission is denied or sensors are absent.
-- Motion should be low-pass-filtered and dead-zoned before affecting the game. Do not assume tilt means the same thing in portrait and landscape.
+- **Body:** Stick Ranger's: 11 Verlet points with distance constraints, kept upright by negative gravity on the head and hips while grounded, walking by kicking the rear knee every 15 ticks, ragdolling when airborne or asleep, and grabbable by pointer.
+- **Climbing:** on a ladder the body is posed against the rungs, hands and feet alternating, moving up or down at a fixed speed. Collisions are skipped while climbing.
+- **One-way platforms:** a joint that started the tick above a platform row lands on it; climbing passes through. Platforms form the floor holes where ladders go between storeys and bridge the mine shaft.
+- **Pathfinding:** a breadth-first search over *stand* nodes (feet on solid ground or a platform with 16 px of headroom; roofs don't count) and *climb* nodes (beside a ladder). Moves: walk a pixel (stepping up or down up to 5 px), drop off a ledge, mount, climb, dismount. Paths compress into walk and climb waypoints the body follows.
+- **Recovery:** no progress toward a waypoint for 4 s means a replan. After 3 failed replans the settler gives up that job, the job is skipped by everyone for a minute, and the settler climbs out to the nearest place connected to the colony. Buried bodies are pushed up.
 
-## Stickman body physics (`src/stickman.ts`, `src/actor.ts`)
+## Buildings (`blueprints.ts`, `rooms.ts`)
 
-The inhabitant's body uses the same scheme as Stick Ranger's player characters:
+Blueprints are generated from a few parameters (width, storeys, furniture, brick or wood). Each is **hollow**: 2 px side walls, 2 px floors, a gable roof, a built back wall behind every interior cell, doors in the ground floor, glass windows upstairs, and a ladder through a platform hole between storeys. There is **no front wall**, so every building is seen as a dollhouse cutaway.
 
-- 11 Verlet points (head, neck, waist, elbows, hands, knees, feet) joined by distance constraints (3.6 px spine segments, 4.8 px limbs, a soft 6 px knee spacer), damping 0.99, stepped at a fixed 50 Hz.
-- **Upright trick:** for 10 ticks after any point touches the ground, the head gets −0.2 gravity, the waist −0.1, the feet +0.3 and everything else 0. Airborne longer than that (or resting), every point gets 0.05 and the body becomes a limp ragdoll.
-- **Walking:** every 15 ticks, while touching the ground, the rear knee is kicked 4 px forward and lifted (higher when a ledge is ahead, so the figure climbs). Gravity and constraints turn that into the bobbing gait.
-- **Collision:** each point's motion is replayed in ≤4 px sub-steps against the per-pixel terrain; on contact the normal component reflects and the tangential component is halved. Water applies 0.95 drag.
-- **Actions:** chopping, hammering and fighting are short arm thrusts applied to the joints, not keyframes.
-- Joints can be grabbed and flung with the pointer, like Stick Ranger.
+**Room rules (Terraria style):** a storey counts as a room when a flood fill from inside it stays enclosed by walls/floor/roof (solid materials, doors, glass, platforms), every interior cell has a built back wall, it has a door or platform on its edge, and it is big enough. Its kind comes from its furniture:
 
-The simulation (`World.characterX`, task) stays the persistent source of truth. `Actor` is presentation-level physics that walks the body toward the simulated position and teleports it after large offline jumps. Body state is not saved.
-
-## Materials and falling sand (`src/materials.ts`, `src/terrain.ts`)
-
-Everything in the world except the stickman, creatures (the monster) and sky/backdrop elements (sky, sun, stars, clouds, distant hills) is a material cell in a 256 × 256 grid. Each cell stores a material, a color shade (kept when a grain moves) and a life value (gas lifetime, or remaining burn time).
-
-| Kind | Materials | Behavior |
+| Kind | Furniture | Used for |
 | --- | --- | --- |
-| Static | Stone, Dirt, Grass, Wood (bark), Leaf, Plank, Thatch, Glass, Embers | Never move. Wood-type cells and grass can burn. |
-| Powder | Sand, Ash, Sawdust | Fall, slide diagonally into piles, sink through lighter liquids. Ash and sawdust float on water. |
-| Liquid | Water | Falls, then spreads sideways up to 4 cells. |
-| Gas | Fire, Smoke, Steam | Rise and drift, then expire. |
+| Home | Bed | Sleeping; free beds let new settlers arrive |
+| Library | Bookshelf | Scholars read books here for Knowledge |
+| Alchemy lab | Cauldron | Alchemists research new blueprints and improvements |
 
-- **Fire:** flames ignite neighbors by flammability. A burning cell throws flames, counts down its burn time, then becomes ash, dirt (grass) or empty. Water douses fire and turns to steam. The campfire's embers emit flames forever.
-- **Slow processes** run on 400 random cells per tick: grass spreads over exposed dirt, ash/sawdust decays, sunlit water evaporates.
-- **Water balance:** puddles on soil or wood soak in; the river is held at a constant level by a spring and overflow at the right edge; water running off the left edge leaves the world.
-- **Tilt** biases which way powders slide and liquids flow, so tipping the frame tips sand and water.
-- The stickman collides only with ground-like materials (stone, dirt, grass, sand, sawdust), so he walks past trees and through the hut doorway area, and is pushed up if buried.
-- The grid (material + shade) is run-length encoded into localStorage every 5 seconds (~125 KB).
+A room that stops counting (burnt wall, missing back wall) stops working until it is repaired.
 
-## Structures (`src/structures.ts`)
+| Blueprint | Storeys | Notes |
+| --- | --- | --- |
+| Cabin | 1 | Two beds. Known from the start |
+| Library | 2 | Alchemy lab below, three bookshelves and a desk above. Known from the start |
+| Bunkhouse | 2 | Four beds (researched) |
+| Stone cottage | 1 | Brick and fireproof, three beds (researched) |
+| Grand library | 3 | Twin cauldrons, two floors of stacks (researched) |
 
-Trees, the hut, the fence and the campfire are templates stamped into the grid. After that they are ordinary cells:
+## The colony (`colony.ts`, `research.ts`, `trees.ts`)
 
-- Construction tasks place cells bottom-up as the task progresses.
-- If over 65% of a building is gone (burnt or knocked away, not merely buried or flooded), the simulation loses it (`world.hut = false`, "The hut burned down!") and the inhabitant rebuilds it later. Damaged buildings are slowly repaired.
-- Burnt trees regrow from the roots up over about a minute.
+Each settler has a name for life and a role the player can change in the panel.
 
-## Weather (`src/weather.ts`)
+- **Miners** follow a mine plan modelled on Tower Defense's Mine: a 9 px laddered shaft sunk from a platform-covered mouth, a tunnel 20 px tall out either side at each level (28 px apart), platforms across the shaft at each level and as bridges over caves, torches once researched. They dig what they can reach, a few cells a strike, and carry stone and ore up to the yard. Levels: 3, then more with Deeper shaft I–III.
+- **Builders** pick the next building (homes when beds run short, the library early on), find level-ish ground near the campfire, clear trees, fill a foundation, then place the blueprint bottom-up a few cells a strike, paying for each cell. When short of wood they chop it themselves.
+- **Woodcutters** fell the nearest grown tree (10 strikes, sawdust flying) and carry the logs to the woodpile. Felled trees regrow from the roots up.
+- **Scholars** (modelled on the Library's professors) take a book from a shelf, read it at the desk and put it back. Each book read earns Knowledge, more with more shelves.
+- **Alchemists** (the lab's researchers) start the next project (the player's pick, or the cheapest affordable), paying its Knowledge and metal up front, then stir the cauldron and write up notes until its work time is done.
+- Everyone sleeps at night: in their own bed if a home has one free, otherwise by the fire as a ragdoll.
+- A new settler arrives every 90 s while there are more beds than settlers (minimum four). Roles follow a fixed mix.
 
-Clouds are sky elements. About a third of them rain; every raindrop is a Water cell.
+## Camera and input (`main.ts`)
 
-## Render layer
+- The camera follows one stickman (a small gold marker over their head). Tap a stickman or pick a name in the panel to follow them; in `?frame` mode a tap on empty ground switches to the next one.
+- Dragging pans freely. After 90 s untouched it goes back to following.
+- Grabbing a stickman's joint flings them (Stick Ranger style).
+- The Touch section's element buttons pour sand, water, fire, sawdust, stone or wood, or erase. *Look* returns to camera mode.
+- Keys: `[` `]` switch stickman, `WASD` pan, `←` `→` tilt.
 
-- All drawing goes into a software framebuffer (`src/pixels.ts`): 1 px Bresenham lines, midpoint circles, dithered gradients. One `putImageData` per frame, so nothing is anti-aliased.
-- Light comes from glowing cells (fire, embers, burning wood, lit windows), accumulated on an 8 px block grid and applied per pixel at night in quantized, Bayer-dithered bands.
-- Water, steam and smoke are drawn semi-transparent over the backdrop.
-- Canvas logical size: 256 × 256.
-- CSS scales the canvas while preserving a square aspect ratio.
-- Nearest-neighbor sampling for crisp pixel art.
-- Light and weather derived from world state, with display effects separated from gameplay.
-- Ambient mode should minimize overlays.
+## Render layer (`render.ts`, `pixels.ts`)
+
+- A 256 × 256 software framebuffer: 1 px Bresenham lines, midpoint circles, a dithered sky tied to altitude, parallax hills, one `putImageData` per frame.
+- Materials have patterned looks: bookshelves with book spines, beds with pillows and blankets, desks, a bubbling cauldron, three-pixel ladders, doors with knobs, ore flecks.
+- **Light** is computed on 4 px blocks around the view: sky light enters where there is no back wall (half through built walls), glowing cells (fire, embers, torches, cauldrons, burning wood) and each stickman's lantern emit light, and both spread with loss (more through rock), then are blurred and applied per pixel in Bayer-dithered bands. Firelight never lights the sky backdrop.
+
+## Persistence (`persistence.ts`)
+
+- `stick-simulation-colony-v2`: the colony as JSON (settlers, roles, sites, trees, resources, Knowledge, research, time).
+- `stick-simulation-world-v2`: the cell and back-wall layers, run-length encoded (about 70 KB).
+- Saved every 15 s and when the page hides. On load, up to an hour away is caught up on by running extra ticks within an 8 ms frame budget.
+- Old saves from the single-stickman prototype are ignored and a new world starts.
 
 ## Hardware integration checkpoints
 
@@ -108,11 +108,3 @@ Clouds are sky elements. About a third of them rain; every raindrop is a Water c
 3. Validate sensor bridge and axis calibration on the actual mounted orientation.
 4. Test power loss, boot-to-game, auto-restart, and long-duration save integrity.
 5. Design and physically test a freestanding enclosure with protected wiring and ventilation.
-
-## Quality gates
-
-- Simulate 12 hours of world time with no crashes or non-finite state.
-- Save, close, reopen, and correctly recover bounded elapsed-time progress.
-- Touch targets remain usable at the intended physical display size.
-- Simulation remains functional without internet or motion permissions.
-- Fullscreen rendering maintains 1:1 aspect ratio on non-square test monitors.

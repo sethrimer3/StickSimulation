@@ -10,34 +10,61 @@
     <div id="app">
       <main class="display-shell" aria-label="StickSimulation living pixel-art world">
         <div class="frame">
-          <canvas id="world" width="256" height="256" aria-label="Autonomous wilderness diorama. Tap the forest, settlement, or water to suggest activities."></canvas>
+          <canvas id="world" width="256" height="256" aria-label="A colony of stickmen in a falling-sand world. Drag to look around, tap a stickman to follow them."></canvas>
         </div>
       </main>
       <aside class="control-panel">
         <p class="eyebrow">A LIVING FRAME</p>
         <h1>StickSimulation</h1>
-        <p class="description">A miniature world that carries on with or without you.</p>
+        <p class="description">A colony of stickmen that carries on with or without you.</p>
         <div class="status">
           <div><span>World age</span><strong id="age">Day 1</strong></div>
-          <div><span>Doing</span><strong id="activity">Waking up</strong></div>
-          <div><span>Supplies</span><strong id="resources">0 wood · 0 fish</strong></div>
+          <div><span>Settlers</span><strong id="people">3</strong></div>
+          <div><span>Knowledge</span><strong id="knowledge">0</strong></div>
+          <div><span>Supplies</span><strong id="resources">0 wood</strong></div>
         </div>
-        <p id="event" role="status" aria-live="polite">The wilderness is quiet.</p>
-        <div class="elements" role="group" aria-label="Touch tool">
-          <button type="button" data-element="suggest" aria-pressed="true">Suggest</button>
-          <button type="button" data-element="Sand" aria-pressed="false">Sand</button>
-          <button type="button" data-element="Water" aria-pressed="false">Water</button>
-          <button type="button" data-element="Fire" aria-pressed="false">Fire</button>
-          <button type="button" data-element="Sawdust" aria-pressed="false">Sawdust</button>
-          <button type="button" data-element="Stone" aria-pressed="false">Stone</button>
-          <button type="button" data-element="Plank" aria-pressed="false">Wood</button>
-          <button type="button" data-element="erase" aria-pressed="false">Erase</button>
-        </div>
+        <p id="event" role="status" aria-live="polite"></p>
+        <p id="catchup" class="catchup" hidden></p>
+
+        <section>
+          <div class="section-head">
+            <h2>Stickmen</h2>
+            <button id="free-cam" type="button" class="secondary small" aria-pressed="false">Free camera</button>
+          </div>
+          <ul id="settlers" class="settlers"></ul>
+        </section>
+
+        <section>
+          <h2>Alchemy lab</h2>
+          <div id="research-now" class="research-now"></div>
+          <p class="hint">Pick what to research next (otherwise the alchemists choose):</p>
+          <div id="research-list" class="research-list"></div>
+        </section>
+
+        <section>
+          <h2>Buildings</h2>
+          <ul id="rooms" class="rooms"></ul>
+        </section>
+
+        <section>
+          <h2>Touch</h2>
+          <div class="elements" role="group" aria-label="Touch tool">
+            <button type="button" data-element="camera" aria-pressed="true">Look</button>
+            <button type="button" data-element="Sand" aria-pressed="false">Sand</button>
+            <button type="button" data-element="Water" aria-pressed="false">Water</button>
+            <button type="button" data-element="Fire" aria-pressed="false">Fire</button>
+            <button type="button" data-element="Sawdust" aria-pressed="false">Sawdust</button>
+            <button type="button" data-element="Stone" aria-pressed="false">Stone</button>
+            <button type="button" data-element="Plank" aria-pressed="false">Wood</button>
+            <button type="button" data-element="erase" aria-pressed="false">Erase</button>
+          </div>
+        </section>
+
         <div class="actions">
           <button id="motion" type="button">Enable motion</button>
-          <button id="reset" type="button" class="secondary">Restart world</button>
+          <button id="reset" type="button" class="secondary">New world</button>
         </div>
-        <p class="help">In Suggest mode, touch the trees to suggest gathering, the river to suggest fishing, or the hut site to suggest building. Pick an element to pour it into the world instead. Drag the stickman to fling him. Tilting (← and → on desktop) tips sand and water sideways.</p>
+        <p class="help">Drag the world to look around (it goes back to following after a while). Tap a stickman, or pick a name above, to follow them; grab a stickman to fling them. In Look mode nothing is poured; pick an element to pour it instead. Keys: <kbd>[</kbd> <kbd>]</kbd> switch stickman, <kbd>WASD</kbd> pan, <kbd>←</kbd> <kbd>→</kbd> tilt.</p>
       </aside>
     </div>
     <script type="module" src="/src/main.ts"></script>

@@ -10,16 +10,22 @@
 
 ## Phase 1: watchable vertical slice
 
-- [x] One autonomous stickman with a work loop.
-- [x] Gather wood, fish, eat and rest.
-- [x] Build campfire, hut and fence.
-- [x] Simple day/night cycle and occasional monster threat.
-- [x] Tap-to-suggest task.
+- [x] One autonomous stickman with a work loop (first prototype).
+- [x] Simple day/night cycle.
 - [x] Save and capped offline catch-up.
 - [x] Stick Ranger-style Verlet body, physical walking and joint dragging.
 - [x] Pixel-art software renderer with per-pixel terrain and banded lighting.
 - [x] Falling-sand elements: everything but the stickman, creatures and sky is a material (sand, water, fire, smoke, steam, ash, sawdust, wood, ...).
 - [x] Fire spreads, buildings can burn down and be rebuilt, trees regrow, rain falls as water.
+- [x] One big Terraria-style world with a following/panning camera.
+- [x] Several named stickmen with roles: miners, builders, woodcutters, scholars, alchemists.
+- [x] Pathfinding with ladders and one-way platforms; Stick Ranger climbing.
+- [x] Hollow dollhouse buildings with back walls; Terraria-style room rules by furniture.
+- [x] Mine (laddered shaft and tunnels, torches) and library with an alchemy lab, after Tower Defense.
+- [x] Research tree of blueprints and improvements; settlers arrive when there are free beds.
+- [ ] Bring back food (fishing, farming), monsters and the fence.
+- [ ] Repairs after fire, and firefighting.
+- [ ] Mine hazards: floods, cave-ins, lava.
 - [ ] More elements (lava, snow/ice, oil, plants, seeds) and seasons.
 - [ ] Improve construction stages.
 - [ ] Add a simple event log that persists.
@@ -38,7 +44,7 @@
 - [ ] Weather and seasons.
 - [ ] Crafting and equipment.
 - [ ] Exploration and discoveries.
-- [ ] Multiple autonomous agents, social behavior and visitors.
+- [ ] Social behavior and visitors.
 - [ ] Persistent world events, structures with histories.
 - [ ] Castle/settlement progression.
 

@@ -1,11 +1,11 @@
 # StickSimulation
 
-A tiny autonomous wilderness inside a **freestanding, square, touchscreen picture frame**. A stick-figure inhabitant gathers resources, fishes, builds a settlement, survives threats, and gradually changes the world while you watch. Touch and tilt provide optional influence without turning it into a game that requires constant attention.
+A tiny autonomous colony inside a **freestanding, square, touchscreen picture frame**. Stickmen with Stick Ranger bodies mine a big Terraria-style falling-sand world, fell trees, put up hollow dollhouse buildings, study in a library and research new blueprints in its alchemy lab, while you watch. The camera follows one stickman at a time; touch and tilt give optional influence without turning it into a game that needs constant attention.
 
 ## Project principles
 
 1. **Ambient first:** It must remain interesting as an unattended living diorama.
-2. **Autonomy:** The inhabitant makes decisions and performs tasks without being commanded.
+2. **Autonomy:** The settlers decide what to do and do it without being commanded.
 3. **Optional influence:** Touch encourages a task or inspects the world; tilting affects presentation or subtle world interactions.
 4. **Persistence:** Progress survives restarts; elapsed real time can advance the simulation.
 5. **Hardware independence:** Develop on desktop first, connect the physical frame later.
@@ -26,9 +26,11 @@ No display model or sensor has been selected or purchased. Browser device-orient
 - TypeScript + Vite + Canvas 2D.
 - Logical rendering resolution: **256 × 256** (1:1 aspect ratio), nearest-neighbor scaling.
 - Fixed-step simulation loop, separated from drawing.
-- Stick Ranger-style Verlet stickman (11 points, upright-gravity trick, knee-kick walking) at 50 Hz.
-- Falling-sand world: every pixel except the stickman, creatures and sky is a material (sand, water, fire, wood, ...), Powder Toy style.
-- Software pixel framebuffer with light from burning/glowing cells.
+- Stick Ranger-style Verlet stickmen (11 points, upright-gravity trick, knee-kick walking, ladder climbing) at 50 Hz.
+- One 1024 × 512 falling-sand world (Powder Toy style): every pixel except the stickmen and the sky is a material; a back-wall layer sits behind it. Only awake 16 × 16 chunks are simulated.
+- Terraria-style rooms: hollow buildings with back walls, doors and platform floors; rooms count by their furniture (beds, bookshelves, cauldrons).
+- A colony of named settlers with roles (miner, builder, woodcutter, scholar, alchemist), pathfinding across the world and up ladders, adapted from the Tower Defense Mine and Library.
+- Software pixel framebuffer with a camera and light spreading from the sky, torches and fire.
 - Local storage saves, including bounded offline catch-up.
 - Pointer/touch events and optional browser orientation input.
 
@@ -50,16 +52,17 @@ Node.js 20.19+ or 22.12+ is recommended for the chosen Vite major version. The d
 
 ## Prototype controls
 
-- **Drag the stickman:** Grab any joint and fling it; it gets back up on its own.
-- **Element buttons (side panel):** Pick Sand, Water, Fire, Sawdust, Stone, Wood or Erase, then touch/drag on the world to pour it. *Suggest* returns to task suggestions.
-- **Tap a tree:** Suggest gathering wood.
-- **Tap the water:** Suggest fishing.
-- **Tap near the settlement:** Suggest building (when enough resources exist).
-- **Motion button:** Request browser orientation access (where supported) and apply subtle parallax. This is *not* yet Raspberry Pi IMU support.
-- **Keyboard left/right:** Preview tilt on a desktop (parallax plus sideways sand and water).
-- **Reset button:** Clear local progress after confirmation.
-
-The prototype uses deliberately accelerated task durations to demonstrate the loop. These are not final idle-game progression rates.
+- **Watch:** The camera follows one stickman (gold marker over their head).
+- **Follow someone else:** Tap a stickman, or pick a name in the side panel's Stickmen list. In `?frame` mode a tap on empty ground switches to the next stickman.
+- **Look around:** Drag the world to pan; after 90 s untouched the camera goes back to following. *Free camera* toggles it.
+- **Jobs:** Each stickman's job can be changed from the list (builder, miner, woodcutter, scholar, alchemist).
+- **Research:** The Alchemy lab section lists what can be researched next; pick one or let the alchemists choose.
+- **Buildings:** The list shows each room, whether it counts (✓) or why not (✗), the building under construction and how far the mine is dug.
+- **Fling:** Grab a stickman's joint and throw them; they get back up on their own.
+- **Pour:** In the Touch section pick Sand, Water, Fire, Sawdust, Stone, Wood or Erase, then drag on the world. *Look* returns to camera mode.
+- **Keys:** `[` `]` switch stickman, `WASD` pan, `←` `→` tilt (sand and water slide sideways).
+- **Motion button:** Request browser orientation access (where supported) for tilt. This is *not* yet Raspberry Pi IMU support.
+- **New world:** Start over after confirmation.
 
 ## Documentation
 
@@ -67,6 +70,6 @@ The prototype uses deliberately accelerated task durations to demonstrate the lo
 - [Technical architecture](docs/ARCHITECTURE.md)
 - [Milestones](docs/ROADMAP.md)
 
-## Initial scope
+## Current scope
 
-The first vertical slice demonstrates one character, wood gathering, fishing, campfire/hut/fence construction, day-night lighting, occasional monster threats, input suggestions, and persistent progress. Everything beyond that, including generations, character memory, village population, advanced physics, and actual Raspberry Pi sensor wiring, is a proposed future feature rather than an implemented system.
+A colony in one large world: settlers mine, chop, build cabins and a library, study, research blueprints and improvements, sleep at night, and new settlers arrive when there are beds. The first prototype's fishing, food and monsters are not in this version yet (see the roadmap). Generations, character memory and actual Raspberry Pi sensor wiring are future ideas rather than implemented systems.
