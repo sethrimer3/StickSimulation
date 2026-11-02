@@ -19,6 +19,8 @@ export interface StoryInfo {
   floorDy: number;
   /** A cell inside the room, used to check enclosure. */
   seed: { dx: number; dy: number };
+  /** Interior height in pixels. */
+  height: number;
 }
 
 export interface Blueprint {
@@ -173,7 +175,7 @@ function makeBlueprint(plan: BuildingPlan): Blueprint {
     }
     const f = new Furnisher(g, spots, SIDE, w - SIDE, floorTop, wallKind);
     st.furnish(f);
-    stories.push({ floorDy: floorTop, seed: { dx: Math.floor(w / 2), dy: floorTop - 2 } });
+    stories.push({ floorDy: floorTop, seed: { dx: Math.floor(w / 2), dy: floorTop - 2 }, height: st.height });
     floorTop -= st.height + FLOOR;
   }
   // Top ceiling under the roof.
@@ -287,6 +289,7 @@ export function cellCost(m: Material | null, wall: WallKind): Partial<Record<Res
     case Material.Thatch: add("wood", 0.012); break;
     case Material.Bookshelf: case Material.Bed: case Material.Desk: add("wood", 0.03); break;
     case Material.Torch: add("wood", 0.5); break;
+    case Material.Scaffold: case Material.ScaffoldPole: add("wood", 0.005); break;
     case Material.Brick: add("stone", 0.05); break;
     case Material.Cauldron: add("stone", 0.1); break;
     default: break;

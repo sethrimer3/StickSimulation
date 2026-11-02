@@ -31,7 +31,7 @@ Everything under `Colony` and `Terrain` is DOM-free and steps at a fixed 50 Hz (
 
 One large Terraria-style side view, **2048 × 512 pixels**, of which the frame shows 256 × 256 through a camera.
 
-- **Cells:** every pixel is a material (stone, dirt, grass, sand, water, steam, smoke, fire, ash, sawdust, wood, leaves, planks, thatch, glass, embers, bedrock, copper/silver/gold ore, brick, ladder, platform, door, bookshelf, desk, bed, cauldron, torch). Only the stickmen and the sky/backdrop (sky, sun, stars, clouds, distant hills) are not materials.
+- **Cells:** every pixel is a material (stone, dirt, grass, sand, water, steam, smoke, fire, ash, sawdust, wood, leaves, planks, thatch, glass, embers, bedrock, copper/silver/gold ore, brick, ladder, platform, door, bookshelf, desk, bed, cauldron, torch, scaffold deck and pole). Only the stickmen and the sky/backdrop (sky, sun, stars, clouds, distant hills) are not materials.
 - **Back walls:** a second layer behind the cells: natural dirt and stone walls underground, and the plank or brick walls the builders put up. Stickmen never touch back walls.
 - **Falling sand:** powders pile, liquids spread, gases rise, fire spreads by flammability and is doused by water. Only **16 × 16 chunks that are awake** are simulated (a change wakes its chunk and neighbours), so the big world stays cheap.
 - **Slow processes** run on random cells: grass spreads, ash and sawdust rot, sunlit puddles evaporate, pools drain into soil. A spring keeps the lake at its level.
@@ -40,11 +40,11 @@ One large Terraria-style side view, **2048 × 512 pixels**, of which the frame s
 
 ## Stickmen (`stickman.ts`, `nav.ts`)
 
-- **Body:** Stick Ranger's, drawn with white limbs and a hollow square head: 11 Verlet points with distance constraints, kept upright by negative gravity on the head and hips while grounded, walking by kicking the rear knee every 15 ticks, ragdolling when airborne or asleep, and grabbable by pointer.
+- **Body:** Stick Ranger's, drawn with white limbs and a hollow square head (the neck stops at the head's edge): 11 Verlet points with distance constraints, kept upright by negative gravity on the head and hips while grounded, walking by kicking the rear knee every 15 ticks, ragdolling when airborne or asleep, and grabbable by pointer.
 - **Climbing:** on a ladder the body is posed against the rungs, hands and feet alternating, moving up or down at a fixed speed. Collisions are skipped while climbing.
 - **One-way platforms:** a joint that started the tick above a platform row lands on it; climbing passes through. Platforms form the floor holes where ladders go between storeys and bridge the mine shaft.
-- **Pathfinding:** a breadth-first search over *stand* nodes (feet on solid ground or a platform with 16 px of headroom; roofs don't count) and *climb* nodes (beside a ladder). Moves: walk a pixel (stepping up or down up to 5 px), drop off a ledge, mount, climb, dismount. Paths compress into walk and climb waypoints the body follows.
-- **Recovery:** no progress toward a waypoint for 4 s means a replan. After 3 failed replans the settler gives up that job, the job is skipped by everyone for a minute, and the settler climbs out to the nearest place connected to the colony. Buried bodies are pushed up.
+- **Pathfinding:** a breadth-first search over *stand* nodes (feet on solid ground or a platform with 16 px of headroom; roofs only count for builders) and *climb* nodes (beside a ladder or scaffold pole). Moves: walk a pixel (stepping up or down up to 5 px), drop off a ledge, mount, climb, dismount. Paths compress into walk and climb waypoints the body follows.
+- **Recovery:** no progress toward a waypoint for 4 s means a replan. After 3 failed replans the settler gives up that job, skips it for a minute, and the settler climbs out to the nearest place connected to the colony. Buried bodies are pushed up.
 
 ## Buildings (`blueprints.ts`, `rooms.ts`)
 
@@ -73,7 +73,7 @@ A room that stops counting (burnt wall, missing back wall) stops working until i
 Each settler has a name for life and a role the player can change in the panel.
 
 - **Miners** follow a mine plan modelled on Tower Defense's Mine: a 9 px laddered shaft sunk from a platform-covered mouth, a tunnel 20 px tall out either side at each level (28 px apart), platforms across the shaft at each level and as bridges over caves, torches once researched. They dig what they can reach, a few cells a strike, and carry stone and ore up to the yard. Levels: 3, then more with Deeper shaft I–III.
-- **Builders** pick the next building (homes when beds run short, the library early on), find level-ish ground near the campfire, clear trees, fill a foundation, then place the blueprint bottom-up a few cells a strike, paying for each cell. When short of wood they chop it themselves.
+- **Builders** pick the next building (homes when beds run short, the library early on), find level-ish ground near the campfire (at least 36 px from other buildings and well clear of the fire), clear trees and fill a foundation. Then they put up **scaffolding**: a pole at each end, one inside each storey, and walkway decks every 18 px up past the roof's peak. They build the blueprint in reach-sized blocks (16 rows by 24 columns), bottom-up, from the ground, the decks, the floors and the roof itself (builders may walk on roofs; nobody else does). Where scaffolding is in the way, that pixel waits. Last, they take the scaffold down from the top, filling in what the blueprint wants where each piece stood. Their reach is an arm's length (20 px across, 28 px up). When short of wood they chop it themselves. Scholars and alchemists with nothing to do help build, and so do woodcutters while there's plenty of wood.
 - **Woodcutters** fell the nearest grown tree (10 strikes, sawdust flying) and carry the logs to the woodpile. Felled trees regrow from the roots up.
 - **Scholars** (modelled on the Library's professors) take a book from a shelf, read it at the desk and put it back. Each book read earns Knowledge, more with more shelves.
 - **Alchemists** (the lab's researchers) start the next project (the player's pick, or the cheapest affordable), paying its Knowledge and metal up front, then stir the cauldron and write up notes until its work time is done.

@@ -192,6 +192,13 @@ function cellColor(t: Terrain, m: Material, x: number, y: number, i: number, now
       return C.fire[(x * 3 + y + flick) & 3];
     case Material.Ladder:
       return y % 4 === 0 ? C.rung : C.rail;
+    case Material.Scaffold:
+      // Rough boards with a dark underside.
+      if (below !== m && below !== Material.ScaffoldPole) return pal[2];
+      return x % 5 === 0 ? pal[1] : pal[0];
+    case Material.ScaffoldPole:
+      // Lashings every few pixels.
+      return y % 6 === 0 ? pal[2] : (x + y) % 2 === 0 ? pal[0] : pal[3];
     case Material.Platform:
       return below !== m && below !== Material.Ladder ? pal[3] : pal[(x >> 2) & 1];
     case Material.Door: {
@@ -346,16 +353,29 @@ function drawSettler(s: PixelSurface, st: Settler, v: View): void {
   const by1 = Math.min(S - 1, Math.ceil(y1 + 2));
   const before: number[] = [];
   for (let y = by0; y <= by1; y++) for (let x = bx0; x <= bx1; x++) before.push(s.color[y * S + x]);
-  for (const [a, b] of BONES) s.line(p[a].x - ox, p[a].y - oy, p[b].x - ox, p[b].y - oy, C.stick);
   const head = p[Joint.Head];
   const neck = p[Joint.Neck];
   let hx = head.x - neck.x;
   let hy = head.y - neck.y;
   const hl = Math.hypot(hx, hy) || 1;
   hx /= hl; hy /= hl;
-  // A hollow square head, 5 pixels across.
   const cxh = Math.round(head.x - ox + hx * 0.8);
   const cyh = Math.round(head.y - oy + hy * 0.8);
+  for (const [a, b] of BONES) {
+    if (a === Joint.Head || b === Joint.Head) continue;
+    s.line(p[a].x - ox, p[a].y - oy, p[b].x - ox, p[b].y - oy, C.stick);
+  }
+  // The neck runs from the shoulders only up to the edge of the head, never inside it.
+  const nx = neck.x - ox;
+  const ny = neck.y - oy;
+  const dx = nx - cxh;
+  const dy = ny - cyh;
+  const along = Math.max(Math.abs(dx), Math.abs(dy));
+  if (along > 2.5) {
+    const k = 2.5 / along;
+    s.line(nx, ny, cxh + dx * k, cyh + dy * k, C.stick);
+  }
+  // A hollow square head, 5 pixels across.
   s.rect(cxh - 2, cyh - 2, 5, 1, C.stick);
   s.rect(cxh - 2, cyh + 2, 5, 1, C.stick);
   s.rect(cxh - 2, cyh - 1, 1, 3, C.stick);

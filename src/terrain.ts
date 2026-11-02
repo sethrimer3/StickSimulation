@@ -221,8 +221,10 @@ export class Terrain {
     return ONE_WAY[this.cells[this.index(x, y)]];
   }
 
+  /** Climbable: ladders and scaffold poles. */
   isLadder(x: number, y: number): boolean {
-    return this.get(x, y) === Material.Ladder;
+    const m = this.get(x, y);
+    return m === Material.Ladder || m === Material.ScaffoldPole;
   }
 
   isWater(x: number, y: number): boolean {
@@ -233,16 +235,16 @@ export class Terrain {
     return this.life[i] > 0 && FLAMMABILITY[this.cells[i]] > 0;
   }
 
-  /** Something to stand on at row y (solid ground or a platform; roofs don't count). */
-  supports(x: number, y: number): boolean {
-    if (this.get(x, y) === Material.Thatch) return false;
+  /** Something to stand on at row y (solid ground or a platform; roofs only for builders). */
+  supports(x: number, y: number, roofs = false): boolean {
+    if (!roofs && this.get(x, y) === Material.Thatch) return false;
     return this.isSolid(x, y) || this.isOneWay(x, y);
   }
 
   /** Can a stickman stand with feet resting on top of cell (x, y)? */
-  standable(x: number, y: number): boolean {
+  standable(x: number, y: number, roofs = false): boolean {
     if (x < 3 || x >= W - 3 || y < HEADROOM + 1 || y >= H) return false;
-    if (!this.supports(x, y)) return false;
+    if (!this.supports(x, y, roofs)) return false;
     for (let k = 1; k <= HEADROOM; k++) if (this.isSolid(x, y - k)) return false;
     return true;
   }

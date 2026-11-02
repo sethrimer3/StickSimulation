@@ -51,7 +51,7 @@ export class Navigator {
   }
 
   /** The nearest node to a body at feet position (fx, fy). */
-  locate(fx: number, fy: number, climbing: boolean): NavNode | null {
+  locate(fx: number, fy: number, climbing: boolean, roofs = false): NavNode | null {
     const t = this.t;
     const x0 = Math.round(fx);
     const y0 = Math.round(fy);
@@ -67,7 +67,7 @@ export class Navigator {
         for (const dy of [r, -r]) {
           const x = x0 + dx;
           const y = y0 + dy;
-          if (t.standable(x, y)) return { x, y, climb: false };
+          if (t.standable(x, y, roofs)) return { x, y, climb: false };
         }
       }
     }
@@ -80,10 +80,11 @@ export class Navigator {
 
   /**
    * Breadth-first search from `start` to the first node satisfying `goal`.
-   * Returns the node path (start first), or null.
+   * Returns the node path (start first), or null. Builders may walk on roofs.
    */
-  search(start: NavNode, goal: (n: NavNode) => boolean, limit = MAX_EXPANSIONS): NavNode[] | null {
+  search(start: NavNode, goal: (n: NavNode) => boolean, limit = MAX_EXPANSIONS, roofs = false): NavNode[] | null {
     const t = this.t;
+    const standable = (x: number, y: number): boolean => t.standable(x, y, roofs);
     this.gen = (this.gen + 1) >>> 0;
     if (this.gen === 0) { this.stamp.fill(0); this.gen = 1; }
     const gen = this.gen;
@@ -121,13 +122,13 @@ export class Navigator {
           let found = false;
           for (let k = 0; k <= STEP && !found; k++) {
             for (const dy of k === 0 ? [0] : [-k, k]) {
-              if (t.standable(nx, y + dy)) { push(cur, nx, y + dy, false); found = true; break; }
+              if (standable(nx, y + dy)) { push(cur, nx, y + dy, false); found = true; break; }
             }
           }
           if (!found && clearAbove(t, nx, y - 1)) {
             for (let dy = STEP + 1; dy <= DROP; dy++) {
               if (t.isSolid(nx, y + dy - 1) && !t.isOneWay(nx, y + dy - 1)) break;
-              if (t.standable(nx, y + dy)) { push(cur, nx, y + dy, false); break; }
+              if (standable(nx, y + dy)) { push(cur, nx, y + dy, false); break; }
             }
           }
         }
@@ -135,7 +136,7 @@ export class Navigator {
       } else {
         if (ladderNear(t, x, y - 1) && clearAbove(t, x, y - 1)) push(cur, x, y - 1, true);
         if (ladderNear(t, x, y + 1) && !t.isSolid(x, y)) push(cur, x, y + 1, true);
-        if (t.standable(x, y)) push(cur, x, y, false);
+        if (standable(x, y)) push(cur, x, y, false);
       }
     }
     return null;

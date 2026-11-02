@@ -35,7 +35,11 @@ export enum Material {
   Desk,
   Bed,
   Cauldron,
-  Torch
+  Torch,
+  /** Temporary scaffold deck: a one-way walkway builders stand on. */
+  Scaffold,
+  /** Temporary scaffold pole: climbed like a ladder. */
+  ScaffoldPole
 }
 
 export enum Kind {
@@ -145,7 +149,9 @@ export const MATERIALS: Record<Material, MaterialInfo> = {
   [Material.Desk]: info({ name: "Desk", kind: Kind.Static, yields: "wood", ...wooden(90), palette: P("#704f31", "#5a3f27", "#e8dcc0", "#42302a") }),
   [Material.Bed]: info({ name: "Bed", kind: Kind.Static, yields: "wood", ...wooden(60), flammability: 0.03, palette: P("#5a3f27", "#b84a4a", "#e8e0d0", "#8a3434") }),
   [Material.Cauldron]: info({ name: "Cauldron", kind: Kind.Static, glow: 0.35, palette: P("#2e2c33", "#45424c", "#6fd36a", "#1e1d22") }),
-  [Material.Torch]: info({ name: "Torch", kind: Kind.Static, glow: 1, yields: "wood", palette: P("#704f31", "#f0b85a", "#fff3c4", "#db863e") })
+  [Material.Torch]: info({ name: "Torch", kind: Kind.Static, glow: 1, yields: "wood", palette: P("#704f31", "#f0b85a", "#fff3c4", "#db863e") }),
+  [Material.Scaffold]: info({ name: "Scaffold", kind: Kind.Static, oneWay: true, ...wooden(60), palette: P("#b58f5a", "#9e7a48", "#6d5032", "#c9a46c") }),
+  [Material.ScaffoldPole]: info({ name: "Scaffold pole", kind: Kind.Static, ...wooden(60), palette: P("#a0855a", "#8a7048", "#6d5032", "#b8996a") })
 };
 
 /** Back walls: drawn behind cells, never collided with. Built walls make rooms. */

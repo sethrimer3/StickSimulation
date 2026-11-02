@@ -34,7 +34,13 @@ export const YARD_X = MINE_X - 18;
 export const WOODPILE_X = COLONY_X - 24;
 const CARRY_LIMIT = 12;
 /** How far above their feet builders can reach (long-handled tools). */
-const BUILD_REACH_UP = 110;
+const BUILD_REACH_UP = 28;
+const BUILD_REACH_X = 20;
+const BUILD_REACH_DOWN = 20;
+/** Empty ground kept between buildings (and their scaffolding). */
+const BUILDING_GAP = 36;
+/** Rows between scaffold decks. */
+const DECK_EVERY = 18;
 /** What one dug pixel is worth. */
 const YIELD: Amounts = { wood: 0.3, stone: 0.08, copper: 0.5, silver: 0.5, gold: 0.5, sand: 0.08, dirt: 0 };
 const ARRIVAL_SECONDS = 90;
@@ -55,7 +61,13 @@ function settlerName(n: number, seed: number): string {
 
 // ---- jobs ----------------------------------------------------------------------
 
-interface CellJob { x: number; y: number; m: Material | null; wall: WallKind; ifEmpty?: boolean }
+interface CellJob {
+  x: number; y: number; m: Material | null; wall: WallKind;
+  /** Only place into empty cells (scaffolding). */
+  ifEmpty?: boolean;
+  /** Take down scaffolding here. */
+  unscaffold?: boolean;
+}
 
 interface Op {
   kind: "dig" | "place";
@@ -71,17 +83,41 @@ function op(kind: Op["kind"], cells: CellJob[]): Op {
 }
 
 /** Fittings a dug passage may keep (they don't block the way). */
-const FITTING = new Set<Material>([Material.Platform, Material.Ladder, Material.Torch]);
+const FITTING = new Set<Material>([Material.Platform, Material.Ladder, Material.Torch, Material.Scaffold, Material.ScaffoldPole]);
+const SCAFFOLD = new Set<Material>([Material.Scaffold, Material.ScaffoldPole]);
 
 function cellDone(t: Terrain, c: CellJob): boolean {
   const cur = t.get(c.x, c.y);
   const info = MATERIALS[cur];
+  if (c.unscaffold) return !SCAFFOLD.has(cur);
+  // Building over scaffolding waits: the scaffold's removal puts the right material there.
+  if (c.m !== null && !c.ifEmpty && SCAFFOLD.has(cur)) return true;
   if (c.m === null) {
     const clear = cur === Material.Empty || !info.diggable || info.kind === Kind.Gas || info.kind === Kind.Liquid || FITTING.has(cur);
     return clear && (c.wall === WallKind.None || t.wall(c.x, c.y) === c.wall);
   }
   if (c.ifEmpty) return cur !== Material.Empty && info.kind !== Kind.Gas;
   return cur === c.m && (c.wall === WallKind.None || t.wall(c.x, c.y) === c.wall);
+}
+
+/** Bands of rows and blocks of columns a builder can finish from one spot. */
+const BAND = 16;
+const BLOCK = 24;
+
+/** Split cells into reach-sized blocks: bands from the bottom up (or top down), blocks left to right. */
+function blocks(cells: CellJob[], bottom: number, left: number, upward: boolean): CellJob[][] {
+  const groups = new Map<string, { band: number; block: number; cells: CellJob[] }>();
+  for (const c of cells) {
+    const band = Math.floor((bottom - c.y) / BAND);
+    const block = Math.floor((c.x - left) / BLOCK);
+    const key = `${band}:${block}`;
+    let g = groups.get(key);
+    if (!g) { g = { band, block, cells: [] }; groups.set(key, g); }
+    g.cells.push(c);
+  }
+  return [...groups.values()]
+    .sort((a, b) => (upward ? a.band - b.band : b.band - a.band) || a.block - b.block)
+    .map((g) => g.cells.sort((a, b) => (upward ? b.y - a.y : a.y - b.y) || a.x - b.x));
 }
 
 function opDone(t: Terrain, o: Op): boolean {
@@ -116,6 +152,8 @@ export class Settler {
   failures = 0;
   /** The last job this settler claimed. */
   lastClaim = "";
+  /** Where to stay while working (strikes push the body back a little each time). */
+  anchorX: number | null = null;
   replans = 0;
   cooldown = 0;
   activity = "Arriving";
@@ -134,12 +172,15 @@ export class Settler {
 
   /** Path to the first node satisfying `goal`. */
   goTo(nav: Navigator, goal: (n: NavNode) => boolean): boolean {
-    const start = nav.locate(this.body.feetX, this.body.feetY, this.body.climbing);
+    // Builders may walk on roofs; nobody else does.
+    const roofs = this.role === "builder";
+    const start = nav.locate(this.body.feetX, this.body.feetY, this.body.climbing, roofs);
     if (!start) return false;
-    const path = nav.search(start, goal);
+    const path = nav.search(start, goal, undefined, roofs);
     if (!path) return false;
     this.waypoints = Navigator.waypoints(path);
     this.goal = goal;
+    this.anchorX = null;
     this.stuck = 0;
     this.best = Infinity;
     return true;
@@ -221,7 +262,12 @@ export interface ColonySave {
   events: string[];
 }
 
-export interface Site extends SiteSave { ops: Op[]; cursor: number }
+export interface Site extends SiteSave {
+  ops: Op[];
+  cursor: number;
+  /** Construction checks since the cursor last moved. */
+  stalled?: number;
+}
 
 export interface RoomInfo {
   site: number;
@@ -250,7 +296,7 @@ export class Colony {
   private mineCursor = 0;
   private mineKey = "";
   private claims = new Map<string, string>();
-  /** Ops someone gave up on, skipped until the given tick. */
+  /** Ops a settler gave up on ("op|name"), skipped by them until the given tick. */
   private blocked = new Map<string, number>();
   private roomVersion = -1;
   private ticks = 0;
@@ -499,12 +545,52 @@ export class Colony {
     }
     fill.sort((a, b) => b.y - a.y);
     for (let k = 0; k < fill.length; k += 24) ops.push(op("place", fill.slice(k, k + 24)));
-    // The building itself, bottom-up.
-    const cells = bp.cells
-      .map((c) => ({ x: x + c.dx, y: oy + c.dy, m: c.m, wall: c.wall }))
-      .sort((a, b) => b.y - a.y || a.x - b.x);
-    for (let k = 0; k < cells.length; k += 48) ops.push(op("place", cells.slice(k, k + 48)));
+    // Scaffolding: a pole at each end and one inside every storey, decks every
+    // DECK_EVERY rows up past the roof's peak. Put up bottom-up first, taken down top-down last.
+    const scaffold = this.scaffoldCells(bp, x, y);
+    for (const block of blocks(scaffold, y, x, true)) ops.push(op("place", block));
+    // The building itself, in reach-sized blocks, band by band from the bottom.
+    const cells = bp.cells.map((c) => ({ x: x + c.dx, y: oy + c.dy, m: c.m, wall: c.wall }));
+    for (const block of blocks(cells, y + 2, x, true)) ops.push(op("place", block));
+    // Taking the scaffold down leaves what the blueprint wants in its place.
+    const wanted = new Map<number, CellJob>();
+    for (const c of cells) wanted.set(c.y * 8192 + c.x, c);
+    const down = scaffold.map((c) => {
+      const w = wanted.get(c.y * 8192 + c.x);
+      return { x: c.x, y: c.y, m: w?.m ?? null, wall: w?.wall ?? WallKind.None, ifEmpty: false, unscaffold: true };
+    });
+    // Decks come down first (top-down), then the poles, so there is always a way up.
+    const decks = down.filter((c) => scaffold.find((sc) => sc.x === c.x && sc.y === c.y)?.m === Material.Scaffold);
+    const poles = down.filter((c) => !decks.includes(c));
+    for (const block of blocks(decks, y + 2, x, false)) ops.push(op("dig", block));
+    for (const block of blocks(poles, y + 2, x, false)) ops.push(op("dig", block));
     return ops;
+  }
+
+  private scaffoldCells(bp: Blueprint, x: number, y: number): CellJob[] {
+    const t = this.terrain;
+    const oy = y - (bp.height - 2);
+    const cells = new Map<number, CellJob>();
+    const put = (cx: number, cy: number, m: Material): void => {
+      cells.set(cy * 8192 + cx, { x: cx, y: cy, m, wall: WallKind.None, ifEmpty: true });
+    };
+    const left = x - 6;
+    const right = x + bp.width + 5;
+    const decks: number[] = [];
+    for (let d = y - DECK_EVERY; d > oy - 3; d -= DECK_EVERY) decks.push(d);
+    const top = decks[decks.length - 1] ?? y - DECK_EVERY;
+    // Outside poles stand on the ground beside the building.
+    for (const px of [left + 2, right - 2]) {
+      const ground = Math.min(t.surfaceY(px), y + 2);
+      for (let py = ground - 1; py >= top; py--) put(px, py, Material.ScaffoldPole);
+    }
+    // A pole inside each storey, from its floor to its ceiling.
+    for (const story of bp.stories) {
+      const floor = oy + story.floorDy;
+      for (let py = floor - 1; py >= floor - story.height; py--) put(x + 6, py, Material.ScaffoldPole);
+    }
+    for (const d of decks) for (let cx = left; cx <= right; cx++) put(cx, d, Material.Scaffold);
+    return [...cells.values()];
   }
 
   /** Where a new building of this width can go: nearest level-ish ground to the campfire. */
@@ -513,11 +599,12 @@ export class Colony {
     const blocked = (a: number, b: number): boolean => {
       if (a < 12 || b > t.width - 12) return true;
       const overlaps = (lo: number, hi: number): boolean => a < hi && b > lo;
-      if (overlaps(COLONY_X - 14, COLONY_X + 14)) return true;
+      // Keep well clear of the campfire's flames.
+      if (overlaps(COLONY_X - 45, COLONY_X + 45)) return true;
       if (overlaps(MINE_X - 26, MINE_X + 26)) return true;
       if (overlaps(LAKE_FROM - 12, LAKE_TO + 12)) return true;
       if (overlaps(WOODPILE_X - 6, WOODPILE_X + 6)) return true;
-      return this.sites.some((s) => overlaps(s.x - 5, s.x + BLUEPRINTS[s.blueprint].width + 5));
+      return this.sites.some((s) => overlaps(s.x - BUILDING_GAP, s.x + BLUEPRINTS[s.blueprint].width + BUILDING_GAP));
     };
     for (let d = 0; d < 1000; d += 3) {
       for (const x of [COLONY_X + 16 + d, COLONY_X - 16 - d - bp.width]) {
@@ -558,7 +645,20 @@ export class Colony {
       this.log(`The builders marked out a ${bp.name.toLowerCase()}.`);
       return;
     }
+    const before = active.cursor;
     while (active.cursor < active.ops.length && opDone(this.terrain, active.ops[active.cursor])) active.cursor++;
+    active.stalled = active.cursor === before ? (active.stalled ?? 0) + 1 : 0;
+    // Safety net: scaffolding nobody can get at for three minutes is knocked out from inside.
+    if (active.stalled > (3 * 60 * TICK_HZ) / 25 && active.ops[active.cursor]?.cells.every((c) => c.unscaffold)) {
+      for (const o of active.ops.slice(active.cursor)) {
+        for (const c of o.cells) {
+          if (!SCAFFOLD.has(this.terrain.get(c.x, c.y))) continue;
+          this.terrain.set(c.x, c.y, c.m ?? Material.Empty);
+          if (c.wall !== WallKind.None) this.terrain.setWall(c.x, c.y, c.wall);
+        }
+      }
+      active.stalled = 0;
+    }
     if (active.cursor >= active.ops.length) {
       active.done = true;
       active.ops = [];
@@ -602,7 +702,7 @@ export class Colony {
 
   private claim(kind: string, id: number, who: Settler): boolean {
     const key = this.claimKey(kind, id);
-    if ((this.blocked.get(key) ?? 0) > this.ticks) return false;
+    if ((this.blocked.get(`${key}|${who.name}`) ?? 0) > this.ticks) return false;
     const owner = this.claims.get(key);
     if (owner && owner !== who.name) return false;
     this.claims.set(key, who.name);
@@ -614,13 +714,21 @@ export class Colony {
     for (const [k, v] of this.claims) if (v === who.name) this.claims.delete(k);
   }
 
+  /** A place to stand comfortably within reach of some unfinished cell of the op. */
   private reachGoal(o: Op, rx: number, up: number, down: number): (n: NavNode) => boolean {
+    // Leave a margin: the body never stands exactly where the plan says.
+    rx = Math.max(4, rx - 4);
+    up = Math.max(4, up - 6);
+    down = Math.max(4, down - 4);
+    const pending = o.cells.filter((c) => !cellDone(this.terrain, c));
+    const sample = pending.length > 64 ? pending.filter((_, i) => i % Math.ceil(pending.length / 64) === 0) : pending;
     return (n) => {
       if (n.climb) return false;
-      const cx = Math.max(o.x0, Math.min(o.x1, n.x));
-      const cy = Math.max(o.y0, Math.min(o.y1, n.y));
-      const dy = cy - n.y;
-      return Math.abs(cx - n.x) <= rx && dy >= -up && dy <= down;
+      for (const c of sample) {
+        const dy = c.y - n.y;
+        if (Math.abs(c.x - n.x) <= rx && dy >= -up && dy <= down) return true;
+      }
+      return false;
     };
   }
 
@@ -657,17 +765,25 @@ export class Colony {
   }
 
   /** Work on an op's cells nearest the settler; returns cells changed, or -1 if short of materials. */
-  private workOp(s: Settler, o: Op, count: number, digInto: Amounts | null): number {
+  private workOp(s: Settler, o: Op, count: number, digInto: Amounts | null, reach: { x: number; up: number; down: number }): number {
     const t = this.terrain;
     const fx = s.body.feetX;
     const fy = s.body.feetY;
-    const pending = o.cells.filter((c) => !cellDone(t, c));
+    // Only what is within arm's (or pick's) reach.
+    const pending = o.cells.filter((c) => !cellDone(t, c)
+      && Math.abs(c.x - fx) <= reach.x + 2 && fy - c.y <= reach.up + 2 && c.y - fy <= reach.down + 2);
     pending.sort((a, b) => Math.abs(a.x - fx) + Math.abs(a.y - (fy - 8)) - (Math.abs(b.x - fx) + Math.abs(b.y - (fy - 8))));
     let n = 0;
     for (const c of pending.slice(0, count)) {
       const cur = t.get(c.x, c.y);
       const info = MATERIALS[cur];
-      if (c.m === null) {
+      if (c.unscaffold) {
+        if (SCAFFOLD.has(cur)) {
+          if (c.m !== null && !this.pay(c.m, c.wall, Material.Empty, t.wall(c.x, c.y))) return n > 0 ? n : -1;
+          t.set(c.x, c.y, c.m ?? Material.Empty);
+          if (c.wall !== WallKind.None) t.setWall(c.x, c.y, c.wall);
+        }
+      } else if (c.m === null) {
         if (cur !== Material.Empty && info.diggable && info.kind !== Kind.Gas && info.kind !== Kind.Liquid && !FITTING.has(cur)) {
           if (info.yields && digInto) digInto[info.yields] += YIELD[info.yields];
           else if (info.yields) this.resources[info.yields] += YIELD[info.yields];
@@ -678,7 +794,7 @@ export class Colony {
           t.setWall(c.x, c.y, c.wall);
         }
       } else {
-        if (cur === Material.Bedrock) continue;
+        if (cur === Material.Bedrock || (c.ifEmpty && cur !== Material.Empty) || (!c.ifEmpty && SCAFFOLD.has(cur))) continue;
         if (!this.pay(c.m, c.wall, cur, t.wall(c.x, c.y))) return n > 0 ? n : -1;
         if (cur !== c.m) t.set(c.x, c.y, c.m);
         if (c.wall !== WallKind.None) t.setWall(c.x, c.y, c.wall);
@@ -691,7 +807,7 @@ export class Colony {
   private chooseTask(s: Settler): void {
     if (s.failed) {
       // Whatever they were heading for couldn't be reached: leave it for a minute.
-      if (s.lastClaim) this.blocked.set(s.lastClaim, this.ticks + TICK_HZ * 60);
+      if (s.lastClaim) this.blocked.set(`${s.lastClaim}|${s.name}`, this.ticks + TICK_HZ * 60);
       this.unstick(s);
     }
     s.relaxed = false;
@@ -710,16 +826,20 @@ export class Colony {
         break;
       case "woodcutter":
         if (s.carry.wood > 0) { this.haul(s, WOODPILE_X); return; }
+        // With plenty of wood in store, lend the builders a hand.
+        if (this.resources.wood > 400 && this.buildTask(s)) { s.activity = "Helping build"; return; }
         if (this.chopTask(s)) return;
         break;
       case "scholar":
         if (this.readTask(s)) return;
         if (s.carry.wood > 0) { this.haul(s, WOODPILE_X); return; }
+        if (this.buildTask(s)) { s.activity = "Helping build (no library yet)"; return; }
         if (this.chopTask(s)) { s.activity = "Chopping wood (no library yet)"; return; }
         break;
       case "alchemist":
         if (this.researchTask(s)) return;
         if (s.carry.wood > 0) { this.haul(s, WOODPILE_X); return; }
+        if (this.buildTask(s)) { s.activity = "Helping build"; return; }
         if (this.chopTask(s)) { s.activity = this.labRooms().length ? "Chopping wood (nothing to research)" : "Chopping wood (no lab yet)"; return; }
         break;
     }
@@ -801,13 +921,13 @@ export class Colony {
     if (si < 0) { s.activity = "Nothing to build"; return false; }
     const site = this.sites[si];
     let short: Resource | null = null;
-    for (let k = site.cursor; k < Math.min(site.ops.length, site.cursor + 12); k++) {
+    for (let k = site.cursor; k < Math.min(site.ops.length, site.cursor + 8); k++) {
       const o = site.ops[k];
       if (opDone(this.terrain, o)) continue;
       const missing = this.opShortOf(o);
       if (missing) { short = short ?? missing; continue; }
       if (!this.claim(`site${si}`, k, s)) continue;
-      if (s.goTo(this.nav, this.reachGoal(o, 24, BUILD_REACH_UP, 8))) {
+      if (s.goTo(this.nav, this.reachGoal(o, BUILD_REACH_X, BUILD_REACH_UP, BUILD_REACH_DOWN))) {
         s.task = { kind: "build", op: k, phase: "go", timer: 0, idle: 0 };
         s.activity = `Building the ${BLUEPRINTS[site.blueprint].name.toLowerCase()}`;
         s.holding = "hammer";
@@ -875,6 +995,7 @@ export class Colony {
   }
 
   private endTask(s: Settler, cooldown = 0): void {
+    s.anchorX = null;
     this.release(s);
     s.task = null;
     s.stop();
@@ -906,21 +1027,24 @@ export class Colony {
         const list = task.kind === "mine" ? this.mineOps : this.sites.find((x) => !x.done)?.ops;
         const o = list?.[task.op];
         if (!o || opDone(t, o)) { this.endTask(s); break; }
-        if (task.phase === "go") { if (s.arrived) task.phase = "work"; break; }
+        if (task.phase === "go") { if (s.arrived) { task.phase = "work"; s.anchorX = s.body.feetX; } break; }
         const every = task.kind === "mine" ? (this.known.has("copperPicks") ? 9 : 14) : 10;
         if (++task.timer % every !== 0) break;
         const target = { x: (o.x0 + o.x1) / 2, y: (o.y0 + o.y1) / 2 };
         if (s.body.airborne === 0) s.body.strike(target.x);
-        const changed = this.workOp(s, o, task.kind === "mine" ? 8 : 24, task.kind === "mine" ? s.carry : null);
+        const changed = task.kind === "mine"
+          ? this.workOp(s, o, 8, s.carry, { x: 9, up: 24, down: 7 })
+          : this.workOp(s, o, 32, null, { x: BUILD_REACH_X, up: BUILD_REACH_UP, down: BUILD_REACH_DOWN });
         if (changed < 0) {
           s.activity = task.kind === "mine" ? "Waiting for wood" : `Waiting for ${this.opShortOf(o) ?? "materials"}`;
           this.endTask(s, TICK_HZ * 4);
           break;
         }
         task.idle = changed === 0 ? task.idle + 1 : 0;
-        if (task.idle > 4) {
+        // Nothing left within reach from here: move on to where there is.
+        if (task.idle > (task.kind === "build" ? 0 : 4)) {
           // Out of reach from here (fell, or the face moved): walk again.
-          if (s.goTo(this.nav, this.reachGoal(o, task.kind === "mine" ? 9 : 24, task.kind === "mine" ? 24 : BUILD_REACH_UP, task.kind === "mine" ? 7 : 8))) {
+          if (s.goTo(this.nav, this.reachGoal(o, task.kind === "mine" ? 9 : BUILD_REACH_X, task.kind === "mine" ? 24 : BUILD_REACH_UP, task.kind === "mine" ? 7 : BUILD_REACH_DOWN))) {
             task.phase = "go";
             task.idle = 0;
           } else this.endTask(s, TICK_HZ * 2);
@@ -931,7 +1055,7 @@ export class Colony {
       case "chop": {
         const tree = this.trees[task.tree];
         if (!tree || tree.gone || tree.growth < 1) { this.endTask(s); break; }
-        if (task.phase === "go") { if (s.arrived) task.phase = "work"; break; }
+        if (task.phase === "go") { if (s.arrived) { task.phase = "work"; s.anchorX = s.body.feetX; } break; }
         if (++task.timer % 22 !== 0) break;
         s.body.strike(tree.x);
         const hand = s.body.p[Joint.HandR];
@@ -1040,6 +1164,8 @@ export class Colony {
       if (s.task && s.waypoints.length === 0 && s.body.climbing && s.task.kind !== "sleep") s.goTo(this.nav, (n) => !n.climb);
       this.runTask(s);
       const control = s.control(this.nav);
+      // Hold position while working.
+      if (s.anchorX !== null && control.targetX === null && !control.climb && !control.relaxed && s.waypoints.length === 0) control.targetX = s.anchorX;
       if (s.task?.kind === "sleep" && s.task.phase === "rest") { control.relaxed = true; control.targetX = null; }
       s.body.tick(this.terrain, control);
       this.rescue(s);

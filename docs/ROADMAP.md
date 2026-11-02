@@ -24,7 +24,8 @@
 - [x] Mine (laddered shaft and tunnels, torches) and library with an alchemy lab, after Tower Defense.
 - [x] Research tree of blueprints and improvements; settlers arrive when there are free beds.
 - [ ] Bring back food (fishing, farming), monsters and the fence.
-- [ ] Repairs after fire, and firefighting.
+- [x] Scaffolding for builders; builders walk on roofs.
+- [ ] Repairs after fire (including mid-construction), and firefighting.
 - [ ] Mine hazards: floods, cave-ins, lava.
 - [ ] More elements (lava, snow/ice, oil, plants, seeds) and seasons.
 - [ ] Improve construction stages.
