@@ -47,8 +47,27 @@ The initial prototype uses short task durations to make its behavior observable 
 - Ask permission where browser platforms require it. The simulation must work if permission is denied or sensors are absent.
 - Motion should be low-pass-filtered and dead-zoned before affecting the game. Do not assume tilt means the same thing in portrait and landscape.
 
+## Stickman body physics (`src/stickman.ts`, `src/actor.ts`)
+
+The inhabitant's body uses the same scheme as Stick Ranger's player characters:
+
+- 11 Verlet points (head, neck, waist, elbows, hands, knees, feet) joined by distance constraints (3.6 px spine segments, 4.8 px limbs, a soft 6 px knee spacer), damping 0.99, stepped at a fixed 50 Hz.
+- **Upright trick:** for 10 ticks after any point touches the ground, the head gets −0.2 gravity, the waist −0.1, the feet +0.3 and everything else 0. Airborne longer than that (or resting), every point gets 0.05 and the body becomes a limp ragdoll.
+- **Walking:** every 15 ticks, while touching the ground, the rear knee is kicked 4 px forward and lifted (higher when a ledge is ahead, so the figure climbs). Gravity and constraints turn that into the bobbing gait.
+- **Collision:** each point's motion is replayed in ≤4 px sub-steps against the per-pixel terrain; on contact the normal component reflects and the tangential component is halved. Water applies 0.95 drag.
+- **Actions:** chopping, hammering and fighting are short arm thrusts applied to the joints, not keyframes.
+- Joints can be grabbed and flung with the pointer, like Stick Ranger.
+
+The simulation (`World.characterX`, task) stays the persistent source of truth. `Actor` is presentation-level physics that walks the body toward the simulated position and teleports it after large offline jumps. Body state is not saved.
+
+## Terrain (`src/terrain.ts`)
+
+A 256 × 256 per-pixel material grid (empty, dirt, grass, stone, sand, water). It is static for now and is the base for upcoming falling-sand elements.
+
 ## Render layer
 
+- All drawing goes into a software framebuffer (`src/pixels.ts`): 1 px Bresenham lines, midpoint circles, dithered gradients. One `putImageData` per frame, so nothing is anti-aliased.
+- Night and campfire light are applied per pixel in quantized, Bayer-dithered bands.
 - Canvas logical size: 256 × 256.
 - CSS scales the canvas while preserving a square aspect ratio.
 - Nearest-neighbor sampling for crisp pixel art.

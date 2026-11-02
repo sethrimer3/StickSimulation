@@ -13,16 +13,16 @@ const DURATION: Record<Task, number> = {
   wander: 12
 };
 
-const DESTINATION: Record<Task, number> = {
+export const DESTINATION: Record<Task, number> = {
   idle: 124,
-  gather: 55,
-  fish: 211,
+  gather: 52,
+  fish: 188,
   eat: 124,
   rest: 124,
   buildCampfire: 119,
   buildHut: 129,
   buildFence: 128,
-  defend: 180,
+  defend: 171,
   wander: 151
 };
 

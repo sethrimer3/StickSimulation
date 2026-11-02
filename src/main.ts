@@ -1,8 +1,10 @@
 import "./style.css";
+import { Actor } from "./actor";
 import { MotionInput } from "./input";
 import { clearSave, loadWorld, saveWorld } from "./persistence";
 import { render } from "./render";
 import { simulate, taskLabel } from "./simulation";
+import { Terrain } from "./terrain";
 import { createWorld, dayNumber, LOGICAL_SIZE, suggest } from "./world";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#world");
@@ -23,6 +25,9 @@ if (new URLSearchParams(window.location.search).has("frame")) {
 }
 
 let world = loadWorld();
+const terrain = new Terrain();
+let actor = new Actor(world, terrain);
+let lastFrame = performance.now();
 const motion = new MotionInput();
 let keyboardTilt = 0;
 let visualTilt = 0;
@@ -36,10 +41,22 @@ function updateStatus(): void {
   eventLabel!.textContent = world.lastEvent;
 }
 
+function toLogical(event: PointerEvent): { x: number; y: number } {
+  const bounds = canvas!.getBoundingClientRect();
+  return {
+    x: ((event.clientX - bounds.left) / bounds.width) * LOGICAL_SIZE,
+    y: ((event.clientY - bounds.top) / bounds.height) * LOGICAL_SIZE
+  };
+}
+
 canvas.addEventListener("pointerdown", (event) => {
-  const bounds = canvas.getBoundingClientRect();
-  const x = ((event.clientX - bounds.left) / bounds.width) * LOGICAL_SIZE;
-  const y = ((event.clientY - bounds.top) / bounds.height) * LOGICAL_SIZE;
+  const { x, y } = toLogical(event);
+
+  // Like Stick Ranger, any joint of the stickman can be grabbed and flung.
+  if (actor.body.grab(x, y)) {
+    canvas.setPointerCapture(event.pointerId);
+    return;
+  }
 
   if (x < 90 && y > 90) suggest(world, "gather");
   else if (x > 195 && y > 140) suggest(world, "fish");
@@ -47,6 +64,17 @@ canvas.addEventListener("pointerdown", (event) => {
 
   updateStatus();
 });
+
+canvas.addEventListener("pointermove", (event) => {
+  if (!actor.body.dragging) return;
+  const { x, y } = toLogical(event);
+  actor.body.moveGrab(x, y);
+});
+
+const releaseGrab = (): void => actor.body.release();
+canvas.addEventListener("pointerup", releaseGrab);
+canvas.addEventListener("pointercancel", releaseGrab);
+window.addEventListener("blur", releaseGrab);
 
 motionButton.addEventListener("click", async () => {
   motionButton.textContent = await motion.enable();
@@ -56,6 +84,7 @@ resetButton.addEventListener("click", () => {
   if (!window.confirm("Restart this world? Saved progression will be lost.")) return;
   clearSave();
   world = createWorld();
+  actor = new Actor(world, terrain);
   lastUpdate = Date.now();
   updateStatus();
 });
@@ -86,7 +115,10 @@ function loop(): void {
   simulate(world, dt);
   const desiredTilt = Math.abs(keyboardTilt) > 0 ? keyboardTilt : motion.tilt;
   visualTilt += (desiredTilt - visualTilt) * 0.09;
-  render(context!, world, visualTilt, now / 1000);
+  const frameNow = performance.now();
+  actor.update(world, (frameNow - lastFrame) / 1000);
+  lastFrame = frameNow;
+  render(context!, world, terrain, actor, visualTilt, now / 1000);
 
   if (now - lastStatus > 350) {
     updateStatus();

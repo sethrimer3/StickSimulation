@@ -26,6 +26,8 @@ No display model or sensor has been selected or purchased. Browser device-orient
 - TypeScript + Vite + Canvas 2D.
 - Logical rendering resolution: **256 × 256** (1:1 aspect ratio), nearest-neighbor scaling.
 - Fixed-step simulation loop, separated from drawing.
+- Stick Ranger-style Verlet stickman (11 points, upright-gravity trick, knee-kick walking) at 50 Hz.
+- Software pixel framebuffer over a per-pixel material grid (groundwork for falling-sand elements).
 - Local storage saves, including bounded offline catch-up.
 - Pointer/touch events and optional browser orientation input.
 
@@ -47,6 +49,7 @@ Node.js 20.19+ or 22.12+ is recommended for the chosen Vite major version. The d
 
 ## Prototype controls
 
+- **Drag the stickman:** Grab any joint and fling it; it gets back up on its own.
 - **Tap a tree:** Suggest gathering wood.
 - **Tap the water:** Suggest fishing.
 - **Tap near the settlement:** Suggest building (when enough resources exist).

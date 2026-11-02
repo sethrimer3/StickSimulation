@@ -16,7 +16,10 @@
 - [x] Simple day/night cycle and occasional monster threat.
 - [x] Tap-to-suggest task.
 - [x] Save and capped offline catch-up.
-- [ ] Improve movement, activity animation and construction stages.
+- [x] Stick Ranger-style Verlet body, physical walking and joint dragging.
+- [x] Pixel-art software renderer with per-pixel terrain and banded lighting.
+- [ ] Falling-sand elements (sand, water flow, fire, ...) on the terrain grid.
+- [ ] Improve construction stages.
 - [ ] Add a simple event log that persists.
 - [ ] Tune the simulation so it remains engaging when unattended.
 
@@ -47,4 +50,4 @@
 
 ## Explicit non-goals for first prototype
 
-No account system, multiplayer, cloud backend, live service, monetization, advanced physics, high-detail sprites, full crafting trees, or direct character control.
+No account system, multiplayer, cloud backend, live service, monetization, high-detail sprites, full crafting trees, or direct character control.
