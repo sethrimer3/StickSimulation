@@ -23,19 +23,21 @@ const C = {
   rainCloud: rgb("#8a96a0"),
   rainCloudShade: rgb("#6d7882"),
   fire: [rgb("#db863e"), rgb("#f0b85a"), rgb("#f0d47c"), rgb("#fff3c4")],
-  stick: rgb("#15181d"),
+  stick: rgb("#f2efe6"),
   metal: rgb("#b8c5c8"),
   metalDark: rgb("#7e8b90"),
   handle: rgb("#7c5e3a"),
   book: [rgb("#a33b32"), rgb("#3a6aa0"), rgb("#3f8a4e"), rgb("#c9a33b"), rgb("#6a3f8a")],
-  shelfWood: rgb("#4e3722"),
+  shelfWood: rgb("#7a5634"),
+  shelfBoard: rgb("#94704a"),
+  bedPost: rgb("#a07a4c"),
   shelfBack: rgb("#2a1d12"),
   pillow: rgb("#e8e0d0"),
   blanket: rgb("#b84a4a"),
   blanketDark: rgb("#8a3434"),
-  bedFrame: rgb("#5a3f27"),
-  deskTop: rgb("#9e7648"),
-  deskLeg: rgb("#5a3f27"),
+  bedFrame: rgb("#8a6440"),
+  deskTop: rgb("#c0955e"),
+  deskLeg: rgb("#94704a"),
   paper: rgb("#e8dcc0"),
   iron: rgb("#3a3840"),
   ironLight: rgb("#55525c"),
@@ -152,23 +154,40 @@ function cellColor(t: Terrain, m: Material, x: number, y: number, i: number, now
   const right = x < W - 1 ? t.cells[i + 1] : 0;
   switch (m) {
     case Material.Bookshelf: {
-      if (left !== m || right !== m || above !== m || y % 5 === 0) return C.shelfWood;
-      if (hash2(x, Math.floor(y / 5)) < 0.08) return C.shelfBack;
-      return C.book[(hash2(x, 7 + Math.floor(y / 5)) * C.book.length) | 0];
+      // Frame round the edges, a shelf board every 7 rows, books standing on each shelf.
+      const edgeL = left !== m || (x > 1 && t.cells[i - 2] !== m);
+      const edgeR = right !== m || (x < W - 2 && t.cells[i + 2] !== m);
+      if (edgeL || edgeR || above !== m || below !== m || y % 7 === 0) return y % 7 === 0 && !edgeL && !edgeR ? C.shelfBoard : C.shelfWood;
+      const row = Math.floor(y / 7);
+      const book = Math.floor((x + row * 3) / 2);
+      const h = hash2(book, row);
+      if (h < 0.1) return C.shelfBack;
+      // Some books are shorter than the shelf.
+      if (h > 0.75 && y % 7 === 1) return C.shelfBack;
+      const c = C.book[(hash2(book, row + 50) * C.book.length) | 0];
+      return (x + row) % 2 === 0 ? c : mix(c, C.shelfBack, 0.25);
     }
-    case Material.Bed:
-      if (above !== m) {
-        const nearHead = t.cells[i - 1] !== m || t.cells[i - 2] !== m || t.cells[i - 3] !== m;
-        return nearHead ? C.pillow : C.blanket;
-      }
-      if (below !== m || left !== m || right !== m) return C.bedFrame;
-      return C.blanketDark;
+    case Material.Bed: {
+      const r = t.cells;
+      const mattress = left === m && right === m && r[i - 2] === m && r[i + 2] === m;
+      if (!mattress) return above !== m ? C.bedPost : C.bedFrame;
+      if (below !== m) return C.bedFrame;
+      // Pillow near the headboard, blanket over the rest.
+      let fromHead = 0;
+      while (fromHead < 8 && r[i - fromHead - 1] === m) fromHead++;
+      if (fromHead < 7 && above !== m) return C.pillow;
+      if (fromHead < 7) return mix(C.pillow, C.bedFrame, 0.3);
+      return above !== m ? C.blanket : C.blanketDark;
+    }
     case Material.Desk:
-      if (above === Material.Desk) return C.deskLeg;
-      return left === m || right === m ? C.deskTop : C.paper;
+      if (below === Material.Desk && above === m) return C.deskLeg;
+      if (above !== m && below !== m) return C.deskTop;
+      if (left !== m || right !== m) return below === Material.Desk || below === 0 ? C.deskLeg : C.deskTop;
+      return t.cells[i + W * 2] === Material.Desk && below === m ? C.paper : C.deskTop;
     case Material.Cauldron:
-      if (above !== m) return C.brew[(x + flick) % 3];
-      return left !== m || right !== m ? C.iron : C.ironLight;
+      if (above !== m && below === m) return C.brew[(x + flick) % 3];
+      if (left !== m || right !== m) return C.iron;
+      return (x + y) % 5 === 0 ? C.ironLight : mix(C.iron, C.ironLight, 0.5);
     case Material.Torch:
       return C.fire[(x * 3 + y + flick) & 3];
     case Material.Ladder:
@@ -334,7 +353,13 @@ function drawSettler(s: PixelSurface, st: Settler, v: View): void {
   let hy = head.y - neck.y;
   const hl = Math.hypot(hx, hy) || 1;
   hx /= hl; hy /= hl;
-  s.circle(head.x - ox + hx * 0.8, head.y - oy + hy * 0.8, 3, C.stick);
+  // A hollow square head, 5 pixels across.
+  const cxh = Math.round(head.x - ox + hx * 0.8);
+  const cyh = Math.round(head.y - oy + hy * 0.8);
+  s.rect(cxh - 2, cyh - 2, 5, 1, C.stick);
+  s.rect(cxh - 2, cyh + 2, 5, 1, C.stick);
+  s.rect(cxh - 2, cyh - 1, 1, 3, C.stick);
+  s.rect(cxh + 2, cyh - 1, 1, 3, C.stick);
   drawHeld(s, st, ox, oy);
   let k = 0;
   for (let y = by0; y <= by1; y++) for (let x = bx0; x <= bx1; x++) if (s.color[y * S + x] !== before[k++]) backdrop[y * S + x] = 0;
@@ -380,7 +405,7 @@ function computeLight(v: View): void {
           if (BODY_SOLID[m]) solid++;
           else {
             const w = t.walls[i] as WallKind;
-            sky += w === WallKind.None ? 1 : isBuiltWall(w) ? 0.45 : 0;
+            sky += w === WallKind.None ? 1 : isBuiltWall(w) ? 0.8 : 0;
           }
           glow += GLOW[m] + (t.life[i] > 0 && FLAMMABLE[m] ? 0.8 : 0);
         }

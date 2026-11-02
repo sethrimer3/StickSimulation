@@ -10,7 +10,7 @@ import { Kind, Material, MATERIALS, MATERIAL_LIST, WallKind } from "./materials"
 
 export { Material, WallKind } from "./materials";
 
-export const WORLD_W = 1024;
+export const WORLD_W = 2048;
 export const WORLD_H = 512;
 export const CHUNK = 16;
 const CW = WORLD_W / CHUNK;
@@ -20,12 +20,12 @@ const H = WORLD_H;
 
 /** Fixed places in the generated world. */
 export const SURFACE_Y = 200;
-export const COLONY_X = 520;
-export const FLAT_FROM = 420;
-export const FLAT_TO = 712;
-export const MINE_X = 690;
-export const LAKE_FROM = 286;
-export const LAKE_TO = 372;
+export const COLONY_X = 1000;
+export const FLAT_FROM = 700;
+export const FLAT_TO = 1440;
+export const MINE_X = 1410;
+export const LAKE_FROM = 520;
+export const LAKE_TO = 620;
 export const LAKE_LEVEL = 203;
 /** Body headroom (pixels above the feet that must be clear to stand). */
 export const HEADROOM = 16;
@@ -458,7 +458,7 @@ export class Terrain {
   /** Slow processes on randomly chosen cells (growth, decay, evaporation, soaking). */
   private randomTick(env: Environment): void {
     const offsets = [-1, 1, -W - 1, -W + 1, W - 1, W + 1];
-    for (let n = 0; n < 3000; n++) {
+    for (let n = 0; n < 6000; n++) {
       const i = (Math.random() * W * H) | 0;
       const m = this.cells[i] as Material;
       if (m === Material.Empty || m === Material.Stone) continue;

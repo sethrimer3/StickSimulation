@@ -34,11 +34,11 @@ export const YARD_X = MINE_X - 18;
 export const WOODPILE_X = COLONY_X - 24;
 const CARRY_LIMIT = 12;
 /** How far above their feet builders can reach (long-handled tools). */
-const BUILD_REACH_UP = 48;
+const BUILD_REACH_UP = 110;
 /** What one dug pixel is worth. */
 const YIELD: Amounts = { wood: 0.3, stone: 0.08, copper: 0.5, silver: 0.5, gold: 0.5, sand: 0.08, dirt: 0 };
 const ARRIVAL_SECONDS = 90;
-const SAVE_VERSION = 2;
+const SAVE_VERSION = 3;
 
 type Amounts = Record<Resource, number>;
 const emptyAmounts = (): Amounts => ({ wood: 0, stone: 0, copper: 0, silver: 0, gold: 0, sand: 0, dirt: 0 });
@@ -479,11 +479,11 @@ export class Colony {
     const ops: Op[] = [];
     // Clear trees nearby.
     for (const tree of this.trees) {
-      if (!tree.gone && tree.x > x - 14 && tree.x < x + bp.width + 14) tree.gone = true;
+      if (!tree.gone && tree.x > x - 18 && tree.x < x + bp.width + 18) tree.gone = true;
     }
     const treeCells: CellJob[] = [];
     for (let ty = oy - 30; ty < y; ty++) {
-      for (let tx = x - 16; tx < x + bp.width + 16; tx++) {
+      for (let tx = x - 20; tx < x + bp.width + 20; tx++) {
         const m = t.get(tx, ty);
         if (m === Material.Bark || m === Material.Leaf) treeCells.push({ x: tx, y: ty, m: null, wall: WallKind.None });
       }
@@ -503,7 +503,7 @@ export class Colony {
     const cells = bp.cells
       .map((c) => ({ x: x + c.dx, y: oy + c.dy, m: c.m, wall: c.wall }))
       .sort((a, b) => b.y - a.y || a.x - b.x);
-    for (let k = 0; k < cells.length; k += 16) ops.push(op("place", cells.slice(k, k + 16)));
+    for (let k = 0; k < cells.length; k += 48) ops.push(op("place", cells.slice(k, k + 48)));
     return ops;
   }
 
@@ -519,13 +519,13 @@ export class Colony {
       if (overlaps(WOODPILE_X - 6, WOODPILE_X + 6)) return true;
       return this.sites.some((s) => overlaps(s.x - 5, s.x + BLUEPRINTS[s.blueprint].width + 5));
     };
-    for (let d = 0; d < 480; d += 2) {
+    for (let d = 0; d < 1000; d += 3) {
       for (const x of [COLONY_X + 16 + d, COLONY_X - 16 - d - bp.width]) {
         if (blocked(x, x + bp.width)) continue;
         const heights: number[] = [];
         for (let k = 0; k < bp.width; k += 2) heights.push(t.surfaceY(x + k));
         heights.sort((a, b) => a - b);
-        if (heights[heights.length - 1] - heights[0] > 12) continue;
+        if (heights[heights.length - 1] - heights[0] > 16) continue;
         return { x, y: heights[Math.floor(heights.length / 2)] };
       }
     }
@@ -807,7 +807,7 @@ export class Colony {
       const missing = this.opShortOf(o);
       if (missing) { short = short ?? missing; continue; }
       if (!this.claim(`site${si}`, k, s)) continue;
-      if (s.goTo(this.nav, this.reachGoal(o, 14, BUILD_REACH_UP, 8))) {
+      if (s.goTo(this.nav, this.reachGoal(o, 24, BUILD_REACH_UP, 8))) {
         s.task = { kind: "build", op: k, phase: "go", timer: 0, idle: 0 };
         s.activity = `Building the ${BLUEPRINTS[site.blueprint].name.toLowerCase()}`;
         s.holding = "hammer";
@@ -911,7 +911,7 @@ export class Colony {
         if (++task.timer % every !== 0) break;
         const target = { x: (o.x0 + o.x1) / 2, y: (o.y0 + o.y1) / 2 };
         if (s.body.airborne === 0) s.body.strike(target.x);
-        const changed = this.workOp(s, o, task.kind === "mine" ? 8 : 6, task.kind === "mine" ? s.carry : null);
+        const changed = this.workOp(s, o, task.kind === "mine" ? 8 : 24, task.kind === "mine" ? s.carry : null);
         if (changed < 0) {
           s.activity = task.kind === "mine" ? "Waiting for wood" : `Waiting for ${this.opShortOf(o) ?? "materials"}`;
           this.endTask(s, TICK_HZ * 4);
@@ -920,7 +920,7 @@ export class Colony {
         task.idle = changed === 0 ? task.idle + 1 : 0;
         if (task.idle > 4) {
           // Out of reach from here (fell, or the face moved): walk again.
-          if (s.goTo(this.nav, this.reachGoal(o, task.kind === "mine" ? 9 : 14, task.kind === "mine" ? 24 : BUILD_REACH_UP, task.kind === "mine" ? 7 : 8))) {
+          if (s.goTo(this.nav, this.reachGoal(o, task.kind === "mine" ? 9 : 24, task.kind === "mine" ? 24 : BUILD_REACH_UP, task.kind === "mine" ? 7 : 8))) {
             task.phase = "go";
             task.idle = 0;
           } else this.endTask(s, TICK_HZ * 2);

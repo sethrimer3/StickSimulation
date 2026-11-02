@@ -6,6 +6,7 @@
  * furniture inside it.
  */
 import { isBuiltWall, Material, MATERIALS, MATERIAL_LIST } from "./materials";
+import { FURNITURE_CELLS } from "./blueprints";
 import type { Terrain } from "./terrain";
 
 export type RoomKind = "home" | "library" | "lab" | "empty";
@@ -56,14 +57,16 @@ export function checkRoom(t: Terrain, sx: number, sy: number, box: { x0: number;
     }
   }
   result.area = seen.size;
-  result.beds = Math.floor((counts.get(Material.Bed) ?? 0) / 19);
-  result.shelves = Math.floor((counts.get(Material.Bookshelf) ?? 0) / 100);
-  result.desks = Math.floor((counts.get(Material.Desk) ?? 0) / 14);
-  result.cauldrons = Math.floor((counts.get(Material.Cauldron) ?? 0) / 20);
+  // A piece of furniture still counts when a little of it is damaged.
+  const pieces = (m: Material, cells: number): number => Math.floor((counts.get(m) ?? 0) / (cells * 0.85));
+  result.beds = pieces(Material.Bed, FURNITURE_CELLS.bed);
+  result.shelves = pieces(Material.Bookshelf, FURNITURE_CELLS.shelf);
+  result.desks = pieces(Material.Desk, FURNITURE_CELLS.desk);
+  result.cauldrons = pieces(Material.Cauldron, FURNITURE_CELLS.cauldron);
   result.kind = result.cauldrons > 0 ? "lab" : result.shelves > 0 ? "library" : result.beds > 0 ? "home" : "empty";
   if (missingWall > 0) { result.reason = "Missing back wall"; return result; }
   if (!entrance) { result.reason = "No door"; return result; }
-  if (result.area < 120) { result.reason = "Too small"; return result; }
+  if (result.area < 1200) { result.reason = "Too small"; return result; }
   result.valid = true;
   return result;
 }

@@ -29,7 +29,7 @@ Everything under `Colony` and `Terrain` is DOM-free and steps at a fixed 50 Hz (
 
 ## The world (`terrain.ts`, `materials.ts`)
 
-One large Terraria-style side view, **1024 × 512 pixels**, of which the frame shows 256 × 256 through a camera.
+One large Terraria-style side view, **2048 × 512 pixels**, of which the frame shows 256 × 256 through a camera.
 
 - **Cells:** every pixel is a material (stone, dirt, grass, sand, water, steam, smoke, fire, ash, sawdust, wood, leaves, planks, thatch, glass, embers, bedrock, copper/silver/gold ore, brick, ladder, platform, door, bookshelf, desk, bed, cauldron, torch). Only the stickmen and the sky/backdrop (sky, sun, stars, clouds, distant hills) are not materials.
 - **Back walls:** a second layer behind the cells: natural dirt and stone walls underground, and the plank or brick walls the builders put up. Stickmen never touch back walls.
@@ -40,7 +40,7 @@ One large Terraria-style side view, **1024 × 512 pixels**, of which the frame s
 
 ## Stickmen (`stickman.ts`, `nav.ts`)
 
-- **Body:** Stick Ranger's: 11 Verlet points with distance constraints, kept upright by negative gravity on the head and hips while grounded, walking by kicking the rear knee every 15 ticks, ragdolling when airborne or asleep, and grabbable by pointer.
+- **Body:** Stick Ranger's, drawn with white limbs and a hollow square head: 11 Verlet points with distance constraints, kept upright by negative gravity on the head and hips while grounded, walking by kicking the rear knee every 15 ticks, ragdolling when airborne or asleep, and grabbable by pointer.
 - **Climbing:** on a ladder the body is posed against the rungs, hands and feet alternating, moving up or down at a fixed speed. Collisions are skipped while climbing.
 - **One-way platforms:** a joint that started the tick above a platform row lands on it; climbing passes through. Platforms form the floor holes where ladders go between storeys and bridge the mine shaft.
 - **Pathfinding:** a breadth-first search over *stand* nodes (feet on solid ground or a platform with 16 px of headroom; roofs don't count) and *climb* nodes (beside a ladder). Moves: walk a pixel (stepping up or down up to 5 px), drop off a ledge, mount, climb, dismount. Paths compress into walk and climb waypoints the body follows.
@@ -48,7 +48,7 @@ One large Terraria-style side view, **1024 × 512 pixels**, of which the frame s
 
 ## Buildings (`blueprints.ts`, `rooms.ts`)
 
-Blueprints are generated from a few parameters (width, storeys, furniture, brick or wood). Each is **hollow**: 2 px side walls, 2 px floors, a gable roof, a built back wall behind every interior cell, doors in the ground floor, glass windows upstairs, and a ladder through a platform hole between storeys. There is **no front wall**, so every building is seen as a dollhouse cutaway.
+Blueprints are generated from a few parameters (width, storeys, furniture, brick or wood). Each is **hollow** and sized for its stickmen (who are about 17 px tall): 3 px side walls and floors, 60 px tall rooms, 26 px doors, beds 24 px long, bookcases 42 px tall, a gable roof, a built back wall behind every interior cell, doors in the ground floor, glass windows, and a ladder through a platform hole between storeys. There is **no front wall**, so every building is seen as a dollhouse cutaway.
 
 **Room rules (Terraria style):** a storey counts as a room when a flood fill from inside it stays enclosed by walls/floor/roof (solid materials, doors, glass, platforms), every interior cell has a built back wall, it has a door or platform on its edge, and it is big enough. Its kind comes from its furniture:
 

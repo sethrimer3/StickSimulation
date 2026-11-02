@@ -15,8 +15,8 @@ export interface Cloud {
   seed: number;
 }
 
-const CLOUD_SPAWN_CHANCE = 1 / (50 * 20); // about one every 20 s across the whole world
-const MAX_CLOUDS = 9;
+const CLOUD_SPAWN_CHANCE = 1 / (50 * 10); // about one every 20 s across the whole world
+const MAX_CLOUDS = 16;
 const RAIN_CHANCE = 0.3;
 
 export class Weather {
@@ -24,7 +24,7 @@ export class Weather {
 
   constructor() {
     // Start with a couple of clouds already in the sky.
-    for (let k = 0; k < 5; k++) this.spawn(Math.random() * WORLD_W, false);
+    for (let k = 0; k < 9; k++) this.spawn(Math.random() * WORLD_W, false);
   }
 
   private spawn(x: number, mayRain = true): void {

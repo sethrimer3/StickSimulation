@@ -1,8 +1,8 @@
 import { Colony, type ColonySave } from "./colony";
 import type { Terrain } from "./terrain";
 
-const KEY = "stick-simulation-colony-v2";
-const GRID_KEY = "stick-simulation-world-v2";
+const KEY = "stick-simulation-colony-v3";
+const GRID_KEY = "stick-simulation-world-v3";
 /** At most this much time away is caught up on when the page opens again. */
 export const MAX_AWAY_SECONDS = 60 * 60;
 

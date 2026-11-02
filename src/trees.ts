@@ -4,7 +4,7 @@
  */
 import { Material } from "./materials";
 import { hash2 } from "./pixels";
-import { COLONY_X, FLAT_FROM, FLAT_TO, groundHeight, LAKE_FROM, LAKE_TO, MINE_X, type Terrain } from "./terrain";
+import { COLONY_X, FLAT_FROM, FLAT_TO, groundHeight, LAKE_FROM, LAKE_TO, MINE_X, WORLD_W, type Terrain } from "./terrain";
 
 export interface TreeCell { x: number; y: number; m: Material; shade: number }
 
@@ -47,7 +47,7 @@ export function treeCells(x: number, seed: number): TreeCell[] {
 export function initialTrees(seed: number): TreeState[] {
   const trees: TreeState[] = [];
   let x = 24;
-  while (x < 1000) {
+  while (x < WORLD_W - 24) {
     const inLake = x > LAKE_FROM - 16 && x < LAKE_TO + 16;
     const inColony = x > FLAT_FROM - 10 && x < FLAT_TO + 10;
     const nearMine = Math.abs(x - MINE_X) < 30;

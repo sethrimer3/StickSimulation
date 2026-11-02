@@ -54,39 +54,55 @@ class Furnisher {
     put(this.g, dx, dy, m, this.wall);
   }
 
+  /** A bed 24 wide: headboard, mattress, pillow end and footboard. */
   bed(dx: number): void {
     const y = this.floorDy;
-    for (let x = 0; x < 9; x++) {
-      this.cell(dx + x, y - 2, Material.Bed);
-      if (x === 0 || x === 8) { this.cell(dx + x, y - 1, Material.Bed); this.cell(dx + x, y - 3, Material.Bed); }
-      else this.cell(dx + x, y - 1, Material.Bed);
+    for (let x = 0; x < BED_W; x++) {
+      for (let r = 3; r <= 5; r++) this.cell(dx + x, y - r, Material.Bed);
+      if (x < 2 || x >= BED_W - 2) for (let r = 1; r <= 2; r++) this.cell(dx + x, y - r, Material.Bed);
     }
-    this.cell(dx, y - 4, Material.Bed);
-    this.spots.push({ kind: "bed", dx: dx + 4, dy: y });
+    for (let r = 6; r <= 10; r++) for (let x = 0; x < 2; x++) this.cell(dx + x, y - r, Material.Bed);
+    for (let r = 6; r <= 7; r++) for (let x = BED_W - 2; x < BED_W; x++) this.cell(dx + x, y - r, Material.Bed);
+    this.spots.push({ kind: "bed", dx: dx + BED_W / 2, dy: y });
   }
 
-  shelf(dx: number, height = 16): void {
+  /** A tall bookcase, 18 wide and 42 tall. */
+  shelf(dx: number): void {
     const y = this.floorDy;
-    for (let yy = 1; yy <= height; yy++) for (let x = 0; x < 7; x++) this.cell(dx + x, y - yy, Material.Bookshelf);
-    this.spots.push({ kind: "shelf", dx: dx + 3, dy: y });
+    for (let yy = 1; yy <= SHELF_H; yy++) for (let x = 0; x < SHELF_W; x++) this.cell(dx + x, y - yy, Material.Bookshelf);
+    this.spots.push({ kind: "shelf", dx: dx + SHELF_W / 2, dy: y });
   }
 
+  /** A writing desk, 20 wide, with a stack of papers on it. */
   desk(dx: number): void {
     const y = this.floorDy;
-    for (let x = 0; x < 8; x++) this.cell(dx + x, y - 5, Material.Desk);
-    for (const x of [0, 7]) for (let yy = 1; yy <= 4; yy++) this.cell(dx + x, y - yy, Material.Desk);
-    this.cell(dx + 2, y - 6, Material.Desk);
-    this.cell(dx + 3, y - 6, Material.Desk);
-    this.spots.push({ kind: "desk", dx: dx + 4, dy: y });
+    for (let x = 0; x < 20; x++) for (const r of [11, 12]) this.cell(dx + x, y - r, Material.Desk);
+    for (const x of [1, 2, 17, 18]) for (let r = 1; r <= 10; r++) this.cell(dx + x, y - r, Material.Desk);
+    for (let x = 4; x < 9; x++) for (const r of [13, 14]) this.cell(dx + x, y - r, Material.Desk);
+    this.spots.push({ kind: "desk", dx: dx + 10, dy: y });
   }
 
+  /** A pot-bellied iron cauldron on legs, 17 wide. */
   cauldron(dx: number): void {
     const y = this.floorDy;
-    const rows = ["  ###  ", " ##### ", "#######", "#######", " #   # "];
+    const rows = [
+      "   ###########   ",
+      "  #############  ",
+      " ############### ",
+      "#################",
+      "#################",
+      "#################",
+      "#################",
+      " ############### ",
+      "  #############  ",
+      "   ###########   ",
+      "   ##       ##   ",
+      "  ##         ##  "
+    ];
     rows.forEach((row, r) => {
       for (let x = 0; x < row.length; x++) if (row[x] === "#") this.cell(dx + x, y - rows.length + r, Material.Cauldron);
     });
-    this.spots.push({ kind: "cauldron", dx: dx + 3, dy: y });
+    this.spots.push({ kind: "cauldron", dx: dx + 8, dy: y });
   }
 
   torch(dx: number, dyFromFloor: number): void {
@@ -105,9 +121,13 @@ interface BuildingPlan {
   cost: Partial<Record<Resource, number>>;
 }
 
-const FLOOR = 2;
-const SIDE = 2;
-const DOOR_H = 18;
+const FLOOR = 3;
+const SIDE = 3;
+const DOOR_H = 26;
+const STORY = 60;
+const BED_W = 24;
+const SHELF_W = 18;
+const SHELF_H = 42;
 
 function makeBlueprint(plan: BuildingPlan): Blueprint {
   const g: Grid = new Map();
@@ -115,7 +135,7 @@ function makeBlueprint(plan: BuildingPlan): Blueprint {
   const shell = plan.brick ? Material.Brick : Material.Plank;
   const wallKind = plan.brick ? WallKind.BrickWall : WallKind.PlankWall;
   const w = plan.width;
-  const roofH = Math.ceil(w / 4);
+  const roofH = Math.ceil(w / 5);
   const bodyH = plan.stories.reduce((s, st) => s + st.height + FLOOR, 0) + FLOOR;
   const height = roofH + bodyH;
   const multi = plan.stories.length > 1;
@@ -146,7 +166,7 @@ function makeBlueprint(plan: BuildingPlan): Blueprint {
         const side = x < SIDE || x >= w - SIDE;
         let m: Material | null = side ? shell : null;
         if (side && k === 0 && r <= DOOR_H) m = Material.Door;
-        if (side && k > 0 && r >= 9 && r <= 14) m = Material.Glass;
+        if (side && r >= 30 && r <= 44) m = Material.Glass;
         put(g, x, y, m, wallKind);
       }
       if (ladderDx !== null && k < plan.stories.length - 1) put(g, ladderDx, y, Material.Ladder, wallKind);
@@ -191,21 +211,21 @@ add({
   id: "cabin",
   name: "Cabin",
   description: "A one-room wooden home with two beds.",
-  width: 34,
-  cost: { wood: 70 },
-  stories: [{ height: 22, furnish: (f) => { f.bed(4); f.bed(20); f.torch(17, 16); } }]
+  width: 96,
+  cost: { wood: 110 },
+  stories: [{ height: STORY, furnish: (f) => { f.bed(8); f.bed(64); f.torch(48, 42); } }]
 });
 
 add({
   id: "library",
   name: "Library",
   description: "Bookshelves upstairs for study, an alchemy lab below for creating blueprints.",
-  width: 60,
-  ladderDx: 52,
-  cost: { wood: 140, stone: 30 },
+  width: 170,
+  ladderDx: 158,
+  cost: { wood: 420, stone: 40 },
   stories: [
-    { height: 22, furnish: (f) => { f.cauldron(6); f.desk(22); f.torch(17, 16); f.torch(40, 16); } },
-    { height: 26, furnish: (f) => { f.shelf(4); f.shelf(13); f.desk(24); f.shelf(36); f.torch(22, 20); } }
+    { height: STORY, furnish: (f) => { f.cauldron(14); f.desk(64); f.torch(46, 42); f.torch(118, 42); } },
+    { height: STORY, furnish: (f) => { f.shelf(8); f.shelf(30); f.shelf(52); f.desk(84); f.shelf(116); f.torch(98, 48); } }
   ]
 });
 
@@ -213,12 +233,12 @@ add({
   id: "bunkhouse",
   name: "Bunkhouse",
   description: "Two floors of beds: room for four more settlers.",
-  width: 34,
-  ladderDx: 28,
-  cost: { wood: 130 },
+  width: 100,
+  ladderDx: 88,
+  cost: { wood: 230 },
   stories: [
-    { height: 22, furnish: (f) => { f.bed(3); f.bed(14); f.torch(12, 16); } },
-    { height: 22, furnish: (f) => { f.bed(3); f.bed(14); f.torch(12, 16); } }
+    { height: STORY, furnish: (f) => { f.bed(8); f.bed(40); f.torch(36, 42); } },
+    { height: STORY, furnish: (f) => { f.bed(8); f.bed(40); f.torch(36, 42); } }
   ]
 });
 
@@ -226,41 +246,52 @@ add({
   id: "stoneCottage",
   name: "Stone cottage",
   description: "A fireproof brick home with three beds.",
-  width: 40,
+  width: 124,
   brick: true,
-  cost: { stone: 150 },
-  stories: [{ height: 22, furnish: (f) => { f.bed(3); f.bed(15); f.bed(27); f.torch(20, 17); } }]
+  cost: { stone: 300 },
+  stories: [{ height: STORY, furnish: (f) => { f.bed(8); f.bed(50); f.bed(92); f.torch(42, 42); f.torch(84, 42); } }]
 });
 
 add({
   id: "grandLibrary",
   name: "Grand library",
-  description: "Two floors of stacks over a bigger lab with twin cauldrons.",
-  width: 64,
-  ladderDx: 56,
-  cost: { wood: 220, stone: 60, copper: 15 },
+  description: "Two floors of stacks over a lab with twin cauldrons.",
+  width: 196,
+  ladderDx: 184,
+  cost: { wood: 700, stone: 80, copper: 15 },
   stories: [
-    { height: 22, furnish: (f) => { f.cauldron(5); f.cauldron(17); f.desk(30); f.torch(27, 16); f.torch(45, 16); } },
-    { height: 26, furnish: (f) => { f.shelf(4); f.shelf(13); f.desk(24); f.shelf(36); f.shelf(45); f.torch(33, 20); } },
-    { height: 26, furnish: (f) => { f.shelf(4); f.shelf(13); f.shelf(22); f.desk(32); f.shelf(45); f.torch(42, 20); } }
+    { height: STORY, furnish: (f) => { f.cauldron(14); f.cauldron(50); f.desk(100); f.torch(40, 42); f.torch(140, 42); } },
+    { height: STORY, furnish: (f) => { f.shelf(8); f.shelf(30); f.shelf(52); f.desk(84); f.shelf(120); f.shelf(142); f.torch(112, 48); } },
+    { height: STORY, furnish: (f) => { f.shelf(8); f.shelf(30); f.shelf(52); f.shelf(74); f.desk(110); f.shelf(142); f.torch(100, 48); } }
   ]
 });
+
+/** Cells in one of each piece of furniture, so rooms can count them. */
+export const FURNITURE_CELLS: Record<FurnitureKind, number> = (() => {
+  const counts = { bed: 0, shelf: 0, desk: 0, cauldron: 0 } as Record<FurnitureKind, number>;
+  for (const kind of Object.keys(counts) as FurnitureKind[]) {
+    const g: Grid = new Map();
+    const f = new Furnisher(g, [], 0, 100, 100, WallKind.None);
+    f[kind](0);
+    counts[kind] = g.size;
+  }
+  return counts;
+})();
 
 /** Resource cost of placing one cell of a material (or a back wall). */
 export function cellCost(m: Material | null, wall: WallKind): Partial<Record<Resource, number>> {
   const c: Partial<Record<Resource, number>> = {};
   const add = (r: Resource, n: number): void => { c[r] = (c[r] ?? 0) + n; };
   switch (m) {
-    case Material.Plank: case Material.Door: case Material.Platform: case Material.Ladder: add("wood", 0.12); break;
-    case Material.Thatch: add("wood", 0.05); break;
-    case Material.Bookshelf: case Material.Bed: case Material.Desk: add("wood", 0.15); break;
+    case Material.Plank: case Material.Door: case Material.Platform: case Material.Ladder: add("wood", 0.03); break;
+    case Material.Thatch: add("wood", 0.012); break;
+    case Material.Bookshelf: case Material.Bed: case Material.Desk: add("wood", 0.03); break;
     case Material.Torch: add("wood", 0.5); break;
-    case Material.Brick: add("stone", 0.2); break;
-    case Material.Cauldron: add("stone", 0.3); break;
-    case Material.Glass: add("sand", 0.1); break;
+    case Material.Brick: add("stone", 0.05); break;
+    case Material.Cauldron: add("stone", 0.1); break;
     default: break;
   }
-  if (wall === WallKind.PlankWall) add("wood", 0.02);
-  if (wall === WallKind.BrickWall) add("stone", 0.03);
+  if (wall === WallKind.PlankWall) add("wood", 0.006);
+  if (wall === WallKind.BrickWall) add("stone", 0.008);
   return c;
 }
