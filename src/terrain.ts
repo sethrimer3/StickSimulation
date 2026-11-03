@@ -11,7 +11,9 @@ import { Kind, Material, MATERIALS, MATERIAL_LIST, WallKind } from "./materials"
 export { Material, WallKind } from "./materials";
 
 export const WORLD_W = 2048;
-export const WORLD_H = 512;
+export const WORLD_H = 1536;
+/** How much bigger underground features are than on the old 512 px world. */
+export const UNDERGROUND_SCALE = 4;
 export const CHUNK = 16;
 const CW = WORLD_W / CHUNK;
 const CH = WORLD_H / CHUNK;
@@ -136,9 +138,12 @@ export class Terrain {
     walls.fill(0);
     this.life.fill(0);
     this.springs.length = 0;
+    // Everything underground is laid out at UNDERGROUND_SCALE: thick dirt over
+    // stone, big ore pockets that get richer with depth, and wide caves.
+    const U = UNDERGROUND_SCALE;
     for (let x = 0; x < W; x++) {
       const top = groundHeight(x, seed);
-      const dirtDepth = 22 + Math.round(noise1(x / 17, seed + 3) * 12);
+      const dirtDepth = Math.round((22 + noise1(x / (17 * U), seed + 3) * 12) * U);
       for (let y = top; y < H; y++) {
         const i = y * W + x;
         const depth = y - top;
@@ -147,26 +152,28 @@ export class Terrain {
         else if (depth < 2) m = Material.Grass;
         else if (depth < dirtDepth) m = Material.Dirt;
         else m = Material.Stone;
-        if (m === Material.Dirt && noise2(x / 9, y / 7, seed + 11) > 0.83) m = Material.Sand;
+        if (m === Material.Dirt && depth > 6 && noise2(x / (9 * U), y / (7 * U), seed + 11) > 0.83) m = Material.Sand;
         if (m === Material.Stone) {
-          if (depth > 30 && depth < 150 && noise2(x / 6, y / 5, seed + 17) > 0.86) m = Material.CopperOre;
-          else if (depth > 110 && depth < 240 && noise2(x / 5, y / 5, seed + 23) > 0.89) m = Material.SilverOre;
-          else if (depth > 200 && noise2(x / 4, y / 4, seed + 29) > 0.91) m = Material.GoldOre;
+          if (depth > 25 * U && depth < 150 * U && noise2(x / (6 * U), y / (5 * U), seed + 17) > 0.86) m = Material.CopperOre;
+          else if (depth > 110 * U && depth < 240 * U && noise2(x / (5 * U), y / (5 * U), seed + 23) > 0.89) m = Material.SilverOre;
+          else if (depth > 200 * U && noise2(x / (4 * U), y / (4 * U), seed + 29) > 0.9) m = Material.GoldOre;
         }
         cells[i] = m;
-        if (depth > 3) walls[i] = depth < dirtDepth + 2 ? WallKind.DirtWall : WallKind.StoneWall;
+        if (depth > 3) walls[i] = depth < dirtDepth + 2 * U ? WallKind.DirtWall : WallKind.StoneWall;
       }
     }
-    // Caves: winding noise tunnels in the stone, kept away from the mine shaft.
+    // Caves: winding passages and big caverns in the stone, kept away from the mine shaft.
     for (let y = 0; y < H - 8; y++) {
       for (let x = 0; x < W; x++) {
         const i = y * W + x;
-        if (cells[i] !== Material.Stone && cells[i] !== Material.CopperOre) continue;
-        if (Math.abs(x - MINE_X) < 40) continue;
+        const m = cells[i];
+        if (m !== Material.Stone && m !== Material.CopperOre && m !== Material.SilverOre) continue;
+        if (Math.abs(x - MINE_X) < 60) continue;
         const depth = y - groundHeight(x, seed);
-        if (depth < 45) continue;
-        const n = noise2(x / 34, y / 16, seed + 41) * 0.65 + noise2(x / 11, y / 9, seed + 43) * 0.35;
-        if (Math.abs(n - 0.5) < 0.035) cells[i] = Material.Empty;
+        if (depth < 45 * U) continue;
+        const n = noise2(x / (34 * U), y / (16 * U), seed + 41) * 0.65 + noise2(x / (11 * U), y / (9 * U), seed + 43) * 0.35;
+        const cavern = noise2(x / (30 * U), y / (18 * U), seed + 47) > 0.8;
+        if (Math.abs(n - 0.5) < 0.035 || cavern) cells[i] = Material.Empty;
       }
     }
     // The lake: water over a stone and sand bed, kept topped up by a spring.

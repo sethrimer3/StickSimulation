@@ -29,13 +29,13 @@ Everything under `Colony` and `Terrain` is DOM-free and steps at a fixed 50 Hz (
 
 ## The world (`terrain.ts`, `materials.ts`)
 
-One large Terraria-style side view, **2048 × 512 pixels**, of which the frame shows 256 × 256 through a camera.
+One large Terraria-style side view, **2048 × 1536 pixels**, of which the frame shows 256 × 256 through a camera.
 
-- **Cells:** every pixel is a material (stone, dirt, grass, sand, water, steam, smoke, fire, ash, sawdust, wood, leaves, planks, thatch, glass, embers, bedrock, copper/silver/gold ore, brick, ladder, platform, door, bookshelf, desk, bed, cauldron, torch, scaffold deck and pole). Only the stickmen and the sky/backdrop (sky, sun, stars, clouds, distant hills) are not materials.
+- **Cells:** every pixel is a material (stone, dirt, grass, sand, water, steam, smoke, fire, ash, sawdust, wood, leaves, planks, thatch, glass, embers, bedrock, copper/silver/gold ore, brick, ladder, platform, door, bookshelf, desk, bed, cauldron, torch, scaffold deck and pole, headframe beam, spoil). Only the stickmen and the sky/backdrop (sky, sun, stars, clouds, distant hills) are not materials.
 - **Back walls:** a second layer behind the cells: natural dirt and stone walls underground, and the plank or brick walls the builders put up. Stickmen never touch back walls.
 - **Falling sand:** powders pile, liquids spread, gases rise, fire spreads by flammability and is doused by water. Only **16 × 16 chunks that are awake** are simulated (a change wakes its chunk and neighbours), so the big world stays cheap.
 - **Slow processes** run on random cells: grass spreads, ash and sawdust rot, sunlit puddles evaporate, pools drain into soil. A spring keeps the lake at its level.
-- **Generation:** smoothed hills (no column steps more than 2 px, so stickmen can walk them), a lake, forests either side of a flat colony site, dirt over stone, ore veins by depth (copper, then silver, then gold), winding caves, and bedrock.
+- **Generation:** smoothed hills (no column steps more than 2 px, so stickmen can walk them), a lake, forests either side of a flat colony site. Underground everything is laid out at 4× scale (`UNDERGROUND_SCALE`), so it reads at the stickmen's size: about 90–130 px of dirt (with sand pockets) over stone, big ore pockets by depth (copper from 100 px down, silver from 440 px, gold from 800 px), wide winding caves and caverns from 180 px down, and bedrock at the bottom.
 - Tilt biases which way sand and water slide.
 
 ## Stickmen (`stickman.ts`, `nav.ts`)
@@ -72,8 +72,8 @@ A room that stops counting (burnt wall, missing back wall) stops working until i
 
 Each settler has a name for life and a role the player can change in the panel.
 
-- **Miners** follow a mine plan modelled on Tower Defense's Mine: a 9 px laddered shaft sunk from a platform-covered mouth, a tunnel 20 px tall out either side at each level (28 px apart), platforms across the shaft at each level and as bridges over caves, torches once researched. They dig what they can reach, a few cells a strike, and carry stone and ore up to the yard. Levels: 3, then more with Deeper shaft I–III.
-- **Builders** pick the next building (homes when beds run short, the library early on), find level-ish ground near the campfire (at least 36 px from other buildings and well clear of the fire), clear trees and fill a foundation. Then they put up **scaffolding**: a pole at each end, one inside each storey, and walkway decks every 18 px up past the roof's peak. They build the blueprint in reach-sized blocks (16 rows by 24 columns), bottom-up, from the ground, the decks, the floors and the roof itself (builders may walk on roofs; nobody else does). Where scaffolding is in the way, that pixel waits. Last, they take the scaffold down from the top, filling in what the blueprint wants where each piece stood. Their reach is an arm's length (20 px across, 28 px up). When short of wood they chop it themselves. Scholars and alchemists with nothing to do help build, and so do woodcutters while there's plenty of wood.
+- **Miners** follow a mine plan after Tower Defense's Mine: a 9 px laddered shaft sunk from a platform-covered mouth under a timber headframe, a tunnel 20 px tall out either side at each level (40 px apart), platforms across the shaft at each level and as bridges over caves, and torches once researched. From each tunnel's end a **drift** steps up or down toward the nearest worthwhile ore pocket and ends in a lit chamber where the pocket is dug out; drifts stop short of loose sand. When a dig breaks into a natural **cave**, the crew learn its extent, light its floor and go after the ore on its walls. Ore pockets and cave work are side jobs: miners take any within 60 px first (following ore they bare), and otherwise come back to them when the main plan is done, so ore out of reach never holds the mine up. Miners carry what they dig to the **hoist**: they tip it into the bucket at the shaft on their level, and the bucket is wound up to the yard, where ore goes into the stores and dug dirt onto a falling-sand **spoil heap**. Every fifth miner (from the second) works the **night shift**. Every 30 s the plan is rechecked from the top, so passages sand fell into are dug out again. Levels: 4, then more with Deeper shaft I–III (30 in all, down near the bedrock).
+- **Builders** pick the next building (homes when beds run short, the library early on), find level-ish ground near the campfire (at least 36 px from other buildings and well clear of the fire), cut down trees in the way at the trunk (their crowns come down with them) and fill a foundation. Then they put up **scaffolding**: a pole at each end, one inside each storey, and walkway decks every 18 px up past the roof's peak. They build the blueprint in reach-sized blocks (16 rows by 24 columns), bottom-up, from the ground, the decks, the floors and the roof itself (builders may walk on roofs; nobody else does). Where scaffolding is in the way, that pixel waits. Last, they take the scaffold down from the top, filling in what the blueprint wants where each piece stood. Their reach is an arm's length (20 px across, 28 px up). When short of wood they chop it themselves. Scholars and alchemists with nothing to do help build, and so do woodcutters while there's plenty of wood.
 - **Woodcutters** fell the nearest grown tree (10 strikes, sawdust flying) and carry the logs to the woodpile. Felled trees regrow from the roots up.
 - **Scholars** (modelled on the Library's professors) take a book from a shelf, read it at the desk and put it back. Each book read earns Knowledge, more with more shelves.
 - **Alchemists** (the lab's researchers) start the next project (the player's pick, or the cheapest affordable), paying its Knowledge and metal up front, then stir the cauldron and write up notes until its work time is done.
@@ -96,10 +96,10 @@ Each settler has a name for life and a role the player can change in the panel.
 
 ## Persistence (`persistence.ts`)
 
-- `stick-simulation-colony-v2`: the colony as JSON (settlers, roles, sites, trees, resources, Knowledge, research, time).
-- `stick-simulation-world-v2`: the cell and back-wall layers, run-length encoded (about 70 KB).
+- `stick-simulation-colony-v4`: the colony as JSON (settlers, roles, sites, trees, resources, Knowledge, research, time).
+- `stick-simulation-world-v4`: the cell and back-wall layers, run-length encoded (about 200 KB).
 - Saved every 15 s and when the page hides. On load, up to an hour away is caught up on by running extra ticks within an 8 ms frame budget.
-- Old saves from the single-stickman prototype are ignored and a new world starts.
+- Saves from an older world size are ignored and a new world starts.
 
 ## Hardware integration checkpoints
 

@@ -26,6 +26,8 @@
 - [ ] Bring back food (fishing, farming), monsters and the fence.
 - [x] Scaffolding for builders; builders walk on roofs.
 - [ ] Repairs after fire (including mid-construction), and firefighting.
+- [x] Mine drifts, caves, hoist and bucket, spoil heap, night shift (after Tower Defense's Mine).
+- [ ] Forge and smithy, supplies, shoring, ore sense, prospects (Tower Defense's Mine).
 - [ ] Mine hazards: floods, cave-ins, lava.
 - [ ] More elements (lava, snow/ice, oil, plants, seeds) and seasons.
 - [ ] Improve construction stages.

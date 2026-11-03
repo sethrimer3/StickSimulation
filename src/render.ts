@@ -48,7 +48,11 @@ const C = {
   doorKnob: rgb("#d9b44a"),
   log: rgb("#6d4c2e"),
   logEnd: rgb("#c9a36b"),
-  marker: rgb("#f5d36a")
+  marker: rgb("#f5d36a"),
+  rope: rgb("#c9b48a"),
+  bucket: rgb("#5a4a3a"),
+  bucketRim: rgb("#8a8f96"),
+  wheel: rgb("#3e2b1a")
 };
 
 const PALETTES = MATERIAL_LIST.map((m) => MATERIALS[m].palette);
@@ -196,6 +200,8 @@ function cellColor(t: Terrain, m: Material, x: number, y: number, i: number, now
       // Rough boards with a dark underside.
       if (below !== m && below !== Material.ScaffoldPole) return pal[2];
       return x % 5 === 0 ? pal[1] : pal[0];
+    case Material.Beam:
+      return (x + y) % 7 === 0 ? pal[2] : pal[(x + y) & 1];
     case Material.ScaffoldPole:
       // Lashings every few pixels.
       return y % 6 === 0 ? pal[2] : (x + y) % 2 === 0 ? pal[0] : pal[3];
@@ -289,6 +295,34 @@ function drawPiles(s: PixelSurface, v: View): void {
     const pick = res.gold >= 1 && k % 11 === 0 ? 3 : res.silver >= 1 && k % 7 === 0 ? 2 : res.copper >= 1 && k % 4 === 0 ? 1 : 0;
     s.set(Math.round(yx + dx), Math.round(yy - 1 - h), colors[pick]);
   }
+}
+
+/** The hoist: a spoked wheel on the headframe, the rope, and the bucket with its load. */
+function drawHoist(s: PixelSurface, v: View): void {
+  const h = v.colony.hoist;
+  const wheel = v.colony.hoistWheel;
+  const wx = Math.round(wheel.x - v.camX);
+  const wy = Math.round(wheel.y - v.camY);
+  const by = Math.round(h.y - v.camY);
+  if (wx < -10 || wx > S + 10) return;
+  // Rope down the shaft.
+  s.line(wx + 4, wy, wx + 4, by - 4, C.rope);
+  // Bucket, heaped when loaded.
+  s.rect(wx + 2, by - 4, 5, 4, C.bucket);
+  s.rect(wx + 2, by - 4, 5, 1, C.bucketRim);
+  const loaded = h.load.stone + h.load.copper + h.load.silver + h.load.gold + h.load.dirt + h.load.sand > 0;
+  if (loaded) {
+    s.rect(wx + 3, by - 5, 3, 1, h.load.copper > 0 ? PALETTES[Material.CopperOre][2] : PALETTES[Material.Stone][0]);
+    s.set(wx + 4, by - 6, h.load.gold > 0 ? PALETTES[Material.GoldOre][2] : h.load.silver > 0 ? PALETTES[Material.SilverOre][2] : PALETTES[Material.Stone][2]);
+  }
+  // Wheel, its spokes turning with the rope.
+  s.circle(wx, wy, 4, C.wheel);
+  const a = h.y * 0.25;
+  for (let k = 0; k < 3; k++) {
+    const ang = a + (k * Math.PI) / 3;
+    s.line(wx - Math.cos(ang) * 3, wy - Math.sin(ang) * 3, wx + Math.cos(ang) * 3, wy + Math.sin(ang) * 3, C.wheel);
+  }
+  s.set(wx, wy, C.bucketRim);
 }
 
 function drawHeld(s: PixelSurface, st: Settler, ox: number, oy: number): void {
@@ -523,7 +557,7 @@ function makeLight(v: View, sun: number) {
     const skyQ = Math.floor(sky * 6 + d) / 6;
     const emitQ = Math.floor(emit * 5 + d) / 5;
     // A little light everywhere, so the dug-out mine still reads as a cutaway.
-    const ambient = 0.2;
+    const ambient = 0.27;
     out[0] = Math.min(1.15, ambient + skyQ * sr + emitQ * 0.95);
     out[1] = Math.min(1.1, ambient + skyQ * sg + emitQ * 0.75);
     out[2] = Math.min(1.1, ambient * 1.3 + skyQ * sb + emitQ * 0.45);
@@ -539,6 +573,7 @@ export function render(ctx: CanvasRenderingContext2D, v: View): void {
   drawClouds(s, v);
   drawWorld(s, v);
   drawPiles(s, v);
+  drawHoist(s, v);
   for (const st of v.colony.settlers) drawSettler(s, st, v);
   computeLight(v);
   s.present(ctx, makeLight(v, sun));

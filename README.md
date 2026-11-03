@@ -27,7 +27,7 @@ No display model or sensor has been selected or purchased. Browser device-orient
 - Logical rendering resolution: **256 × 256** (1:1 aspect ratio), nearest-neighbor scaling.
 - Fixed-step simulation loop, separated from drawing.
 - Stick Ranger-style Verlet stickmen (11 points, upright-gravity trick, knee-kick walking, ladder climbing) at 50 Hz.
-- One 2048 × 512 falling-sand world (Powder Toy style): every pixel except the stickmen and the sky is a material; a back-wall layer sits behind it. Only awake 16 × 16 chunks are simulated.
+- One 2048 × 1536 falling-sand world (underground features at 4× scale) (Powder Toy style): every pixel except the stickmen and the sky is a material; a back-wall layer sits behind it. Only awake 16 × 16 chunks are simulated.
 - Terraria-style rooms: hollow buildings with back walls, doors and platform floors; rooms count by their furniture (beds, bookshelves, cauldrons).
 - A colony of named settlers with roles (miner, builder, woodcutter, scholar, alchemist), pathfinding across the world and up ladders, adapted from the Tower Defense Mine and Library.
 - Software pixel framebuffer with a camera and light spreading from the sky, torches and fire.

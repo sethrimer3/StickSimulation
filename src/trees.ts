@@ -14,6 +14,8 @@ export interface TreeState {
   growth: number;
   /** Removed for good (built over). */
   gone?: boolean;
+  /** Its crown has been taken down after the trunk was cut. */
+  cleared?: boolean;
 }
 
 export function treeCells(x: number, seed: number): TreeCell[] {

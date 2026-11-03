@@ -31,6 +31,13 @@ export const RESOURCES: Resource[] = ["wood", "stone", "copper", "silver", "gold
 const ROLE_CYCLE: Role[] = ["builder", "miner", "woodcutter", "scholar", "alchemist", "woodcutter", "miner", "scholar", "builder", "miner", "woodcutter", "scholar", "alchemist", "miner", "builder"];
 
 export const YARD_X = MINE_X - 18;
+/** Where the spoil heap is tipped, east of the shaft. */
+export const SPOIL_X = MINE_X + 38;
+/** Rows between mine levels. */
+const LEVEL_GAP = 40;
+/** The bucket's resting place and speed. */
+const HOIST_REST = 14;
+const HOIST_SPEED = 1.5;
 export const WOODPILE_X = COLONY_X - 24;
 const CARRY_LIMIT = 12;
 /** How far above their feet builders can reach (long-handled tools). */
@@ -42,9 +49,9 @@ const BUILDING_GAP = 36;
 /** Rows between scaffold decks. */
 const DECK_EVERY = 18;
 /** What one dug pixel is worth. */
-const YIELD: Amounts = { wood: 0.3, stone: 0.08, copper: 0.5, silver: 0.5, gold: 0.5, sand: 0.08, dirt: 0 };
+const YIELD: Amounts = { wood: 0.3, stone: 0.08, copper: 0.5, silver: 0.5, gold: 0.5, sand: 0.08, dirt: 0.05 };
 const ARRIVAL_SECONDS = 90;
-const SAVE_VERSION = 3;
+const SAVE_VERSION = 4;
 
 type Amounts = Record<Resource, number>;
 const emptyAmounts = (): Amounts => ({ wood: 0, stone: 0, copper: 0, silver: 0, gold: 0, sand: 0, dirt: 0 });
@@ -127,9 +134,10 @@ function opDone(t: Terrain, o: Op): boolean {
 // ---- tasks -------------------------------------------------------------------
 
 type Task =
-  | { kind: "mine"; op: number; phase: "go" | "work"; timer: number; idle: number }
+  | { kind: "mine"; op: number; side?: "vein" | "cave"; phase: "go" | "work"; timer: number; idle: number }
   | { kind: "build"; op: number; phase: "go" | "work"; timer: number; idle: number }
   | { kind: "haul"; to: number; phase: "go" }
+  | { kind: "bucket"; phase: "go" | "tip"; timer: number }
   | { kind: "chop"; tree: number; phase: "go" | "work"; timer: number; strikes: number }
   | { kind: "read"; room: number; phase: "goShelf" | "take" | "goDesk" | "read" | "goBack" | "return"; timer: number; shelf: Spot; desk: Spot }
   | { kind: "research"; room: number; phase: "goCauldron" | "stir" | "goDesk" | "write"; timer: number; cauldron: Spot; desk: Spot }
@@ -257,6 +265,7 @@ export interface ColonySave {
   settlers: SettlerSave[];
   sites: SiteSave[];
   trees: TreeState[];
+  caves?: number[];
   nextArrival: number;
   hired: number;
   events: string[];
@@ -294,6 +303,20 @@ export class Colony {
   events: string[] = [];
   private mineOps: Op[] = [];
   private mineCursor = 0;
+  /** Work found while mining: ore on the walls of caves the dig broke into, torches along their floors. */
+  private extraOps: Op[] = [];
+  /** Ore pockets at the ends of drifts: dug as and where the miners can reach them. */
+  private veinOps: Op[] = [];
+  /** Cells the mine plan digs (so natural caves can be told apart from the workings). */
+  private planMask: Uint8Array;
+  /** Cells of caves already discovered. */
+  private caveMask: Uint8Array;
+  /** One cell of each discovered cave, saved so their work can be planned again after loading. */
+  caves: number[] = [];
+  /** Floors (feet rows) a miner can tip into the bucket from: the surface and each level. */
+  private hoistFloors = new Set<number>();
+  /** The hoist: a bucket on a rope down the shaft, wound up to tip its load in the yard. */
+  hoist = { y: 0, phase: "idle" as "idle" | "down" | "load" | "up" | "tip", timer: 0, target: 0, load: emptyAmounts(), queue: [] as Array<{ y: number; load: Amounts }> };
   private mineKey = "";
   private claims = new Map<string, string>();
   /** Ops a settler gave up on ("op|name"), skipped by them until the given tick. */
@@ -307,9 +330,13 @@ export class Colony {
   constructor(readonly terrain: Terrain, save?: ColonySave | null) {
     this.nav = new Navigator(terrain);
     this.seed = terrain.seed;
+    this.planMask = new Uint8Array(terrain.width * terrain.height);
+    this.caveMask = new Uint8Array(terrain.width * terrain.height);
+    this.hoist.y = groundHeight(MINE_X, terrain.seed) - HOIST_REST;
     if (save) this.load(save);
     else this.found();
     this.planMine();
+    for (const seed of this.caves) this.planCave(seed, false);
   }
 
   // ---- setup / saves ---------------------------------------------------------------
@@ -323,9 +350,33 @@ export class Colony {
     for (let x = COLONY_X - 5; x <= COLONY_X + 5; x++) t.set(x, g - 1, Material.Hearth);
     t.set(COLONY_X - 6, g - 1, Material.Stone);
     t.set(COLONY_X + 6, g - 1, Material.Stone);
+    this.raiseHeadframe();
     this.resources.wood = 60;
     for (const role of ["builder", "miner", "woodcutter", "scholar"] as Role[]) this.addSettler(role, COLONY_X - 21 + this.settlers.length * 14);
     this.log("Four settlers made camp by the fire.");
+  }
+
+  /** Timber A-frame over the shaft's mouth, carrying the hoist's wheel. */
+  private raiseHeadframe(): void {
+    const t = this.terrain;
+    const top = groundHeight(MINE_X, t.seed);
+    const beam = (ax: number, ay: number, bx: number, by: number): void => {
+      const n = Math.max(Math.abs(bx - ax), Math.abs(by - ay));
+      for (let k = 0; k <= n; k++) {
+        const x = Math.round(ax + ((bx - ax) * k) / n);
+        const y = Math.round(ay + ((by - ay) * k) / n);
+        for (const dx of [0, 1]) if (t.get(x + dx, y) === Material.Empty) t.set(x + dx, y, Material.Beam);
+      }
+    };
+    beam(MINE_X - 9, top - 1, MINE_X - 1, top - 32);
+    beam(MINE_X + 9, top - 1, MINE_X + 1, top - 32);
+    beam(MINE_X - 6, top - 12, MINE_X + 6, top - 12);
+    beam(MINE_X - 3, top - 33, MINE_X + 3, top - 33);
+  }
+
+  /** Where the hoist's wheel turns. */
+  get hoistWheel(): { x: number; y: number } {
+    return { x: MINE_X + 3, y: groundHeight(MINE_X, this.seed) - 30 };
   }
 
   private addSettler(role: Role, x: number): Settler {
@@ -343,6 +394,7 @@ export class Colony {
     this.research = save.research;
     this.chosen = save.chosen;
     this.trees = save.trees;
+    this.caves = Array.isArray(save.caves) ? save.caves.filter((n) => Number.isInteger(n)) : [];
     this.nextArrival = save.nextArrival;
     this.hired = save.hired;
     this.events = save.events.slice(-6);
@@ -356,11 +408,16 @@ export class Colony {
   }
 
   toSave(): ColonySave {
+    // Whatever is in the bucket or waiting for it is counted as delivered.
+    const resources = { ...this.resources };
+    for (const load of [this.hoist.load, ...this.hoist.queue.map((q) => q.load)]) {
+      for (const r of RESOURCES) if (r !== "dirt") resources[r] += load[r];
+    }
     return {
       version: SAVE_VERSION,
       seed: this.seed,
       elapsed: this.elapsed,
-      resources: this.resources,
+      resources,
       knowledge: this.knowledge,
       known: [...this.known],
       research: this.research,
@@ -368,6 +425,7 @@ export class Colony {
       settlers: this.settlers.map((s) => ({ name: s.name, role: s.role, x: s.body.feetX, y: Math.round(s.body.feetY), carry: s.carry })),
       sites: this.sites.map((s) => ({ blueprint: s.blueprint, x: s.x, y: s.y, done: s.done })),
       trees: this.trees,
+      caves: this.caves,
       nextArrival: this.nextArrival,
       hired: this.hired,
       events: this.events
@@ -395,7 +453,7 @@ export class Colony {
   }
 
   maxLevels(): number {
-    return 3 + (this.known.has("deepShaft1") ? 3 : 0) + (this.known.has("deepShaft2") ? 4 : 0) + (this.known.has("deepShaft3") ? 3 : 0);
+    return 4 + (this.known.has("deepShaft1") ? 6 : 0) + (this.known.has("deepShaft2") ? 8 : 0) + (this.known.has("deepShaft3") ? 12 : 0);
   }
 
   available(): Project[] {
@@ -446,7 +504,11 @@ export class Colony {
 
   // ---- mine plan -----------------------------------------------------------------------
 
-  /** The mine: a laddered shaft with tunnels out either side at each level. */
+  /**
+   * The mine, after the Tower Defense Mine: a laddered shaft, a tunnel out
+   * either side at every level, and from each tunnel's ends a drift after the
+   * nearest good pocket of ore, ending in a chamber where the ore is dug out.
+   */
   private planMine(): void {
     const levels = this.maxLevels();
     const torches = this.known.has("torches");
@@ -458,19 +520,24 @@ export class Colony {
     const x0 = MINE_X - 4;
     const x1 = MINE_X + 4;
     const ops: Op[] = [];
+    this.planMask.fill(0);
+    this.veinOps = [];
     const rect = (ax: number, ay: number, bx: number, by: number, m: Material | null, ifEmpty = false): CellJob[] => {
       const cells: CellJob[] = [];
-      for (let y = ay; y <= by; y++) for (let x = ax; x <= bx; x++) cells.push({ x, y, m, wall: WallKind.None, ifEmpty });
+      for (let y = ay; y <= by; y++) for (let x = ax; x <= bx; x++) {
+        cells.push({ x, y, m, wall: WallKind.None, ifEmpty });
+        if (m === null && t.inBounds(x, y)) this.planMask[t.index(x, y)] = 1;
+      }
       return cells;
     };
+    this.hoistFloors = new Set([top]);
     // Surface cover: the shaft's mouth is bridged by platforms.
     ops.push(op("dig", rect(x0, top - 3, x1, top - 1, null)));
     ops.push(op("place", rect(x0, top, x1, top + 1, Material.Platform)));
-    const platformRows = new Set<number>([top, top + 1]);
     let y = top + 2;
     for (let k = 0; k < levels; k++) {
-      const yf = top + 30 + 28 * k;
-      if (yf + 4 >= t.height - 10) break;
+      const yf = top + 34 + LEVEL_GAP * k;
+      if (yf + 4 >= t.height - 12) break;
       while (y <= yf + 1) {
         const yb = Math.min(y + 5, yf + 1);
         ops.push(op("dig", rect(x0, y, x1, yb, null)));
@@ -480,9 +547,8 @@ export class Colony {
         y = yb + 1;
       }
       ops.push(op("place", rect(x0, yf, x1, yf + 1, Material.Platform)));
-      platformRows.add(yf);
-      platformRows.add(yf + 1);
-      const reach = 46 + 14 * k;
+      this.hoistFloors.add(yf);
+      const reach = Math.min(160, 46 + 10 * k);
       for (let d = 4; d <= reach; d += 4) {
         for (const side of [1, -1]) {
           const ax = side > 0 ? x1 + d - 3 : x0 - d;
@@ -492,12 +558,145 @@ export class Colony {
           if (torches && d % 24 === 0) ops.push(op("place", [{ x: ax + 1, y: yf - 14, m: Material.Torch, wall: WallKind.None, ifEmpty: true }]));
         }
       }
+      // Drifts start where the tunnel actually ends (its blocks are 4 px wide).
+      const end = Math.floor(reach / 4) * 4;
+      for (const side of [1, -1]) ops.push(...this.planDrift(side > 0 ? x1 + end : x0 - end, yf, side, torches, rect));
       // The ladder continues down past this level's floor.
       y = yf + 2;
     }
     this.mineOps = ops;
     this.mineCursor = 0;
     this.advanceMineCursor();
+  }
+
+  /**
+   * A drift from a tunnel's end toward the nearest worthwhile pocket of ore:
+   * a passage stepping up or down at most a block's height per block, a lit
+   * chamber at its end, then the pocket itself.
+   */
+  private planDrift(
+    fromX: number, floor: number, dir: number, torches: boolean,
+    rect: (ax: number, ay: number, bx: number, by: number, m: Material | null, ifEmpty?: boolean) => CellJob[]
+  ): Op[] {
+    const t = this.terrain;
+    const isOre = (m: Material): boolean => m === Material.CopperOre || m === Material.SilverOre || m === Material.GoldOre;
+    // Nearest ore within a window beyond the tunnel's end.
+    let best: { x: number; y: number; d: number } | null = null;
+    for (let yy = floor - 70; yy <= floor + 50; yy += 2) {
+      for (let dx = 4; dx <= 140; dx += 2) {
+        const xx = fromX + dir * dx;
+        if (!isOre(t.get(xx, yy))) continue;
+        const d = dx + Math.abs(yy - floor) * 1.5;
+        if (!best || d < best.d) best = { x: xx, y: yy, d };
+      }
+    }
+    if (!best) return [];
+    // The pocket: connected ore, worth a drift only if big enough.
+    const vein: CellJob[] = [];
+    const seen = new Set<number>([t.index(best.x, best.y)]);
+    const stack = [t.index(best.x, best.y)];
+    while (stack.length && vein.length < 600) {
+      const i = stack.pop()!;
+      const x = i % t.width;
+      const yy = (i / t.width) | 0;
+      vein.push({ x, y: yy, m: null, wall: WallKind.None });
+      for (const j of [i - 1, i + 1, i - t.width, i + t.width]) {
+        if (!seen.has(j) && isOre(t.cells[j] as Material)) { seen.add(j); stack.push(j); }
+      }
+    }
+    if (vein.length < 40) return [];
+    const cx = vein.reduce((a, c) => a + c.x, 0) / vein.length;
+    const cy = vein.reduce((a, c) => a + c.y, 0) / vein.length;
+    const ops: Op[] = [];
+    // The passage: blocks 4 wide and 20 tall, the floor easing toward the pocket.
+    let x = fromX;
+    let f = floor;
+    const target = Math.round(cy + 10);
+    for (let guard = 0; guard < 60 && Math.abs(cx - x) > 10; guard++) {
+      x += dir * 4;
+      if (f < target) f = Math.min(target, f + 4);
+      else if (f > target) f = Math.max(target, f - 4);
+      const ax = dir > 0 ? x - 3 : x;
+      // Like the Tower Defense Mine's drifts, stop short of loose ground that would pour in.
+      let loose = false;
+      for (let yy = f - 24; yy <= f + 2 && !loose; yy++) for (let xx = ax - 2; xx <= ax + 5; xx++) if (t.get(xx, yy) === Material.Sand) { loose = true; break; }
+      if (loose) return ops;
+      ops.push(op("dig", rect(ax, f - 20, ax + 3, f - 1, null)));
+      ops.push(op("place", rect(ax, f, ax + 3, f + 1, Material.Platform, true)));
+    }
+    // The chamber, lit, and the ore.
+    const ax = Math.round(cx) - 8;
+    ops.push(op("dig", rect(ax, f - 20, ax + 16, f - 1, null)));
+    ops.push(op("place", rect(ax, f, ax + 16, f + 1, Material.Platform, true)));
+    if (torches) ops.push(op("place", [{ x: Math.round(cx), y: f - 14, m: Material.Torch, wall: WallKind.None, ifEmpty: true }]));
+    for (const c of vein) this.planMask[t.index(c.x, c.y)] = 1;
+    for (const block of blocks(vein, Math.round(cy) + 40, Math.round(cx) - 60, false)) this.veinOps.push(op("dig", block));
+    return ops;
+  }
+
+  /**
+   * A dig broke into a natural cave (as in the Tower Defense Mine): the crew
+   * learn its extent, plan torches along its floor and the ore on its walls.
+   */
+  private planCave(seed: number, announce: boolean): void {
+    const t = this.terrain;
+    const W = t.width;
+    const region: number[] = [];
+    const stack = [seed];
+    const seen = new Set<number>([seed]);
+    while (stack.length && region.length < 12000) {
+      const i = stack.pop()!;
+      region.push(i);
+      this.caveMask[i] = 1;
+      for (const j of [i - 1, i + 1, i - W, i + W]) {
+        if (j < 0 || j >= t.cells.length || seen.has(j)) continue;
+        const m = t.cells[j] as Material;
+        if ((m === Material.Empty || m === Material.Water) && !this.planMask[j]) { seen.add(j); stack.push(j); }
+      }
+    }
+    if (region.length < 200) return;
+    if (announce) {
+      this.caves.push(seed);
+      this.log("The miners broke into a cave!");
+    }
+    // Ore on the cave's walls.
+    const ore: CellJob[] = [];
+    const oreSeen = new Set<number>();
+    const torches: CellJob[] = [];
+    let lastTorch = -100;
+    for (const i of region) {
+      const x = i % W;
+      for (const j of [i - 1, i + 1, i - W, i + W]) {
+        const m = t.cells[j] as Material;
+        if ((m === Material.CopperOre || m === Material.SilverOre || m === Material.GoldOre) && !oreSeen.has(j)) {
+          oreSeen.add(j);
+          this.planMask[j] = 1;
+          ore.push({ x: j % W, y: (j / W) | 0, m: null, wall: WallKind.None });
+        }
+      }
+      // Torches along the floor, every 40 px or so.
+      const y = (i / W) | 0;
+      if (this.known.has("torches") && Math.abs(x - lastTorch) > 40 && t.isSolid(x, y + 1) && y - 10 > 0
+        && t.get(x, y - 10) === Material.Empty) {
+        torches.push({ x, y: y - 10, m: Material.Torch, wall: WallKind.None, ifEmpty: true });
+        lastTorch = x;
+      }
+    }
+    for (let k = 0; k < ore.length; k += 24) this.extraOps.push(op("dig", ore.slice(k, k + 24)));
+    for (const c of torches) this.extraOps.push(op("place", [c]));
+  }
+
+  /** After digging cells, look for natural caves they opened into. */
+  private checkForCaves(cells: Array<{ x: number; y: number }>): void {
+    const t = this.terrain;
+    for (const c of cells) {
+      const i = t.index(c.x, c.y);
+      for (const j of [i - 1, i + 1, i - t.width, i + t.width]) {
+        if (j < 0 || j >= t.cells.length || this.caveMask[j] || this.planMask[j]) continue;
+        if (t.cells[j] !== Material.Empty || t.walls[j] === WallKind.None) continue;
+        this.planCave(j, true);
+      }
+    }
   }
 
   private advanceMineCursor(): void {
@@ -527,11 +726,12 @@ export class Colony {
     for (const tree of this.trees) {
       if (!tree.gone && tree.x > x - 18 && tree.x < x + bp.width + 18) tree.gone = true;
     }
+    // Trees in the way are cut down at the trunk (within reach of the ground);
+    // their crowns come down with them (see manageConstruction).
     const treeCells: CellJob[] = [];
-    for (let ty = oy - 30; ty < y; ty++) {
+    for (let ty = y - 30; ty < y; ty++) {
       for (let tx = x - 20; tx < x + bp.width + 20; tx++) {
-        const m = t.get(tx, ty);
-        if (m === Material.Bark || m === Material.Leaf) treeCells.push({ x: tx, y: ty, m: null, wall: WallKind.None });
+        if (t.get(tx, ty) === Material.Bark) treeCells.push({ x: tx, y: ty, m: null, wall: WallKind.None });
       }
     }
     for (let k = 0; k < treeCells.length; k += 40) ops.push(op("dig", treeCells.slice(k, k + 40)));
@@ -601,7 +801,7 @@ export class Colony {
       const overlaps = (lo: number, hi: number): boolean => a < hi && b > lo;
       // Keep well clear of the campfire's flames.
       if (overlaps(COLONY_X - 45, COLONY_X + 45)) return true;
-      if (overlaps(MINE_X - 26, MINE_X + 26)) return true;
+      if (overlaps(MINE_X - 30, SPOIL_X + 100)) return true;
       if (overlaps(LAKE_FROM - 12, LAKE_TO + 12)) return true;
       if (overlaps(WOODPILE_X - 6, WOODPILE_X + 6)) return true;
       return this.sites.some((s) => overlaps(s.x - BUILDING_GAP, s.x + BLUEPRINTS[s.blueprint].width + BUILDING_GAP));
@@ -644,6 +844,13 @@ export class Colony {
       this.addSite(id, spot.x, spot.y, false);
       this.log(`The builders marked out a ${bp.name.toLowerCase()}.`);
       return;
+    }
+    // Trees cut through at the trunk fall: their crowns go too.
+    for (const tree of this.trees) {
+      if (tree.gone && !tree.cleared && trunkLeft(this.terrain, tree) === 0) {
+        this.resources.wood += fellTree(this.terrain, tree);
+        tree.cleared = true;
+      }
     }
     const before = active.cursor;
     while (active.cursor < active.ops.length && opDone(this.terrain, active.ops[active.cursor])) active.cursor++;
@@ -743,6 +950,14 @@ export class Colony {
     return null;
   }
 
+  /** A miner's strike: dig what's in reach, then see whether it opened into a cave. */
+  private mineStrike(s: Settler, o: Op): number {
+    const before = o.kind === "dig" ? o.cells.filter((c) => !cellDone(this.terrain, c)) : [];
+    const n = this.workOp(s, o, this.known.has("copperPicks") ? 10 : 8, s.carry, { x: 9, up: 24, down: 7 });
+    if (n > 0 && before.length) this.checkForCaves(before.filter((c) => cellDone(this.terrain, c)));
+    return n;
+  }
+
   /** Spend resources for a cell, or report that there isn't enough. */
   private pay(m: Material | null, wall: WallKind, current: Material, currentWall: WallKind): boolean {
     if (this.shortOf(m, wall, current, currentWall)) return false;
@@ -804,6 +1019,16 @@ export class Colony {
     return n;
   }
 
+  /** Night shift (as in the Tower Defense Mine): every fifth miner, from the second, works through the night. */
+  nightShift(s: Settler): boolean {
+    if (s.role !== "miner") return false;
+    return this.settlers.filter((x) => x.role === "miner").indexOf(s) % 5 === 1;
+  }
+
+  private sleeping(s: Settler): boolean {
+    return isNight(this.elapsed) && !this.nightShift(s);
+  }
+
   private chooseTask(s: Settler): void {
     if (s.failed) {
       // Whatever they were heading for couldn't be reached: leave it for a minute.
@@ -812,13 +1037,13 @@ export class Colony {
     }
     s.relaxed = false;
     s.holding = "none";
-    if (isNight(this.elapsed)) { s.task = { kind: "sleep", phase: "go" }; return; }
+    if (this.sleeping(s)) { s.task = { kind: "sleep", phase: "go" }; return; }
     if (s.cooldown > 0) { this.idle(s); return; }
     switch (s.role) {
       case "miner":
-        if (s.carried() >= CARRY_LIMIT) { this.haul(s, YARD_X); return; }
+        if (s.carried() + s.carry.dirt >= CARRY_LIMIT) { this.toBucket(s); return; }
         if (this.mineTask(s)) return;
-        if (s.carried() > 0) { this.haul(s, YARD_X); return; }
+        if (s.carried() + s.carry.dirt > 0) { this.toBucket(s); return; }
         break;
       case "builder":
         if (this.buildTask(s)) return;
@@ -888,6 +1113,18 @@ export class Colony {
     s.failed = false;
   }
 
+  /** Take what was dug to the hoist's bucket at the shaft, on the nearest level. */
+  private toBucket(s: Settler): void {
+    const floors = this.hoistFloors;
+    if (s.goTo(this.nav, (n) => !n.climb && n.x >= MINE_X + 5 && n.x <= MINE_X + 9 && floors.has(n.y))) {
+      s.task = { kind: "bucket", phase: "go", timer: 0 };
+      s.activity = "Taking ore to the hoist";
+      s.holding = "ore";
+    } else {
+      this.haul(s, YARD_X);
+    }
+  }
+
   private haul(s: Settler, x: number): void {
     if (s.goTo(this.nav, this.standNear(x, groundHeight(x, this.seed), 3, 8))) {
       s.task = { kind: "haul", to: x, phase: "go" };
@@ -900,6 +1137,33 @@ export class Colony {
 
   private mineTask(s: Settler): boolean {
     this.advanceMineCursor();
+    // Side work, nearest first: ore pockets at the drifts' ends and in caves, torches in caves.
+    const side = [
+      ...this.veinOps.map((o, k) => ({ o, k, side: "vein" as const })),
+      ...this.extraOps.map((o, k) => ({ o, k, side: "cave" as const }))
+    ]
+      .filter(({ o }) => !opDone(this.terrain, o))
+      .map((e) => ({ ...e, d: Math.abs((e.o.x0 + e.o.x1) / 2 - s.body.feetX) + Math.abs((e.o.y0 + e.o.y1) / 2 - s.body.feetY) }))
+      .sort((a, b) => a.d - b.d)
+      .slice(0, 6);
+    const trySide = (maxDistance: number): boolean => {
+      for (const { o, k, side: kind, d } of side) {
+        if (d > maxDistance || !this.claim(kind, k, s)) continue;
+        if (o.kind === "place" && this.resources.wood < 2) { this.release(s); continue; }
+        if (s.goTo(this.nav, this.reachGoal(o, 9, 24, 7))) {
+          s.task = { kind: "mine", op: k, side: kind, phase: "go", timer: 0, idle: 0 };
+          s.activity = o.kind === "place" ? "Lighting a cave" : kind === "vein" ? "Following an ore vein" : "Digging ore in a cave";
+          s.holding = "pick";
+          return true;
+        }
+        // Out of reach for now: leave it be for a while.
+        this.claims.delete(this.claimKey(kind, k));
+        this.blocked.set(`${this.claimKey(kind, k)}|${s.name}`, this.ticks + TICK_HZ * 120);
+      }
+      return false;
+    };
+    // Ore the dig has bared close by comes first, as in the Tower Defense Mine.
+    if (trySide(60)) return true;
     for (let k = this.mineCursor; k < Math.min(this.mineOps.length, this.mineCursor + 8); k++) {
       const o = this.mineOps[k];
       if (opDone(this.terrain, o) || !this.claim("mine", k, s)) continue;
@@ -912,6 +1176,7 @@ export class Colony {
       }
       this.claims.delete(this.claimKey("mine", k));
     }
+    if (trySide(Infinity)) return true;
     s.activity = this.mineCursor >= this.mineOps.length ? "The mine is dug out" : "Can't reach the face";
     return false;
   }
@@ -1007,11 +1272,21 @@ export class Colony {
     const task = s.task;
     if (!task) return;
     const t = this.terrain;
-    if (task.kind !== "sleep" && isNight(this.elapsed)) { this.endTask(s); return; }
+    if (task.kind !== "sleep" && this.sleeping(s)) { this.endTask(s); return; }
     switch (task.kind) {
       case "idle":
         if (task.phase === "go") { if (s.arrived) { task.phase = "wait"; task.timer = TICK_HZ * (3 + Math.random() * 5); } }
         else if (--task.timer <= 0) this.endTask(s);
+        break;
+      case "bucket":
+        if (task.phase === "go") {
+          if (s.arrived) { task.phase = "tip"; task.timer = TICK_HZ; s.activity = "Tipping ore into the bucket"; s.body.strike(MINE_X); }
+        } else if (--task.timer <= 0) {
+          this.hoist.queue.push({ y: Math.round(s.body.feetY), load: { ...s.carry } });
+          for (const r of RESOURCES) s.carry[r] = 0;
+          s.holding = "none";
+          this.endTask(s);
+        }
         break;
       case "haul":
         if (s.arrived) {
@@ -1024,7 +1299,9 @@ export class Colony {
         break;
       case "mine":
       case "build": {
-        const list = task.kind === "mine" ? this.mineOps : this.sites.find((x) => !x.done)?.ops;
+        const list = task.kind === "mine"
+          ? (task.side === "vein" ? this.veinOps : task.side === "cave" ? this.extraOps : this.mineOps)
+          : this.sites.find((x) => !x.done)?.ops;
         const o = list?.[task.op];
         if (!o || opDone(t, o)) { this.endTask(s); break; }
         if (task.phase === "go") { if (s.arrived) { task.phase = "work"; s.anchorX = s.body.feetX; } break; }
@@ -1033,7 +1310,7 @@ export class Colony {
         const target = { x: (o.x0 + o.x1) / 2, y: (o.y0 + o.y1) / 2 };
         if (s.body.airborne === 0) s.body.strike(target.x);
         const changed = task.kind === "mine"
-          ? this.workOp(s, o, 8, s.carry, { x: 9, up: 24, down: 7 })
+          ? this.mineStrike(s, o)
           : this.workOp(s, o, 32, null, { x: BUILD_REACH_X, up: BUILD_REACH_UP, down: BUILD_REACH_DOWN });
         if (changed < 0) {
           s.activity = task.kind === "mine" ? "Waiting for wood" : `Waiting for ${this.opShortOf(o) ?? "materials"}`;
@@ -1126,7 +1403,7 @@ export class Colony {
         break;
       }
       case "sleep":
-        if (!isNight(this.elapsed)) { s.relaxed = false; this.endTask(s); break; }
+        if (!this.sleeping(s)) { s.relaxed = false; this.endTask(s); break; }
         if (task.phase === "go") {
           if (s.waypoints.length === 0 && !s.relaxed && s.activity !== "Heading to bed") {
             const bed = s.bed;
@@ -1146,11 +1423,71 @@ export class Colony {
 
   // ---- the tick ---------------------------------------------------------------------------
 
+  /** The hoist lets the bucket down to whoever has tipped a load into it, then winds it up to the yard. */
+  private stepHoist(): void {
+    const h = this.hoist;
+    const top = groundHeight(MINE_X, this.seed);
+    const rest = top - HOIST_REST;
+    switch (h.phase) {
+      case "idle":
+        if (h.queue.length) { h.target = h.queue[0].y - 5; h.phase = "down"; }
+        else if (h.y !== rest) { h.target = rest; h.phase = "up"; }
+        break;
+      case "down":
+      case "up": {
+        const d = h.target - h.y;
+        h.y += Math.max(-HOIST_SPEED, Math.min(HOIST_SPEED, d));
+        if (Math.abs(h.target - h.y) < 0.01) {
+          h.y = h.target;
+          if (h.phase === "down") { h.phase = "load"; h.timer = TICK_HZ; }
+          else if (h.y === rest && (h.load.stone + h.load.copper + h.load.silver + h.load.gold + h.load.sand + h.load.dirt + h.load.wood) > 0) { h.phase = "tip"; h.timer = TICK_HZ; }
+          else h.phase = "idle";
+        }
+        break;
+      }
+      case "load":
+        if (--h.timer > 0) break;
+        // Take everything waiting at this level.
+        for (let k = h.queue.length - 1; k >= 0; k--) {
+          if (Math.abs(h.queue[k].y - 5 - h.y) > 2) continue;
+          for (const r of RESOURCES) h.load[r] += h.queue[k].load[r];
+          h.queue.splice(k, 1);
+        }
+        h.target = rest;
+        h.phase = "up";
+        break;
+      case "tip":
+        if (--h.timer > 0) break;
+        for (const r of RESOURCES) if (r !== "dirt") this.resources[r] += h.load[r];
+        this.tipSpoil(h.load.dirt);
+        h.load = emptyAmounts();
+        h.phase = "idle";
+        break;
+    }
+  }
+
+  /** Dug dirt goes on the spoil heap east of the shaft, a loose pile that slides into shape. */
+  private tipSpoil(amount: number): void {
+    const t = this.terrain;
+    const top = groundHeight(MINE_X, this.seed);
+    let x = SPOIL_X;
+    // A full heap spills a little further out.
+    while (t.surfaceY(x) < top - 22 && x < SPOIL_X + 90) x += 14;
+    for (let k = 0; k < Math.round(amount); k++) {
+      const px = x + Math.round((Math.random() - 0.5) * 4);
+      const py = t.surfaceY(px) - 6 - Math.floor(Math.random() * 6);
+      if (t.get(px, py) === Material.Empty) t.set(px, py, Material.Spoil);
+    }
+  }
+
   /** One fixed tick (1/50 s). */
   step(): void {
     const dt = 1 / TICK_HZ;
     this.elapsed += dt;
     this.ticks++;
+    this.stepHoist();
+    // Now and then look back over the whole mine: passages that sand or spoil fell into get dug out again.
+    if (this.ticks % (TICK_HZ * 30) === 0) { this.mineCursor = 0; this.advanceMineCursor(); }
     if (this.ticks % 25 === 0) {
       this.manageConstruction();
       this.updateRooms();

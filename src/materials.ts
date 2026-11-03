@@ -39,7 +39,11 @@ export enum Material {
   /** Temporary scaffold deck: a one-way walkway builders stand on. */
   Scaffold,
   /** Temporary scaffold pole: climbed like a ladder. */
-  ScaffoldPole
+  ScaffoldPole,
+  /** Timber of the mine's headframe: stands over the shaft without blocking anyone. */
+  Beam,
+  /** Dug dirt and rubble tipped on the spoil heap: loose, it slides and piles. */
+  Spoil
 }
 
 export enum Kind {
@@ -138,9 +142,9 @@ export const MATERIALS: Record<Material, MaterialInfo> = {
   [Material.Glass]: info({ name: "Glass", kind: Kind.Static, enclosing: true, bodySolid: true, glow: 0.1, palette: P("#a9cfd8", "#8fbcc8", "#c4e0e6", "#7aa9b6") }),
   [Material.Hearth]: info({ name: "Embers", kind: Kind.Static, glow: 0.8, palette: P("#7a2d1a", "#b84a22", "#db863e", "#5c2416") }),
   [Material.Bedrock]: info({ name: "Bedrock", kind: Kind.Static, ...ground, diggable: false, palette: P("#2c2a30", "#3a3740", "#25232a", "#332f38") }),
-  [Material.CopperOre]: info({ name: "Copper ore", kind: Kind.Static, ...ground, yields: "copper", palette: P("#5e6066", "#c4733a", "#e08a4a", "#4c4e55") }),
-  [Material.SilverOre]: info({ name: "Silver ore", kind: Kind.Static, ...ground, yields: "silver", palette: P("#4c4e55", "#c9d2d8", "#eef3f6", "#5e6066") }),
-  [Material.GoldOre]: info({ name: "Gold ore", kind: Kind.Static, ...ground, yields: "gold", palette: P("#3f3d45", "#e8b83a", "#ffe07a", "#4c4a52") }),
+  [Material.CopperOre]: info({ name: "Copper ore", kind: Kind.Static, ...ground, yields: "copper", palette: P("#a85f30", "#c4733a", "#e08a4a", "#5e6066") }),
+  [Material.SilverOre]: info({ name: "Silver ore", kind: Kind.Static, ...ground, yields: "silver", palette: P("#9aa4ab", "#c9d2d8", "#eef3f6", "#5e6066") }),
+  [Material.GoldOre]: info({ name: "Gold ore", kind: Kind.Static, ...ground, yields: "gold", palette: P("#c4952c", "#e8b83a", "#ffe07a", "#4c4a52") }),
   [Material.Brick]: info({ name: "Brick", kind: Kind.Static, ...ground, yields: "stone", palette: P("#8a5a4a", "#9c6a56", "#5f3e34", "#7a4e40") }),
   [Material.Ladder]: info({ name: "Ladder", kind: Kind.Static, yields: "wood", ...wooden(80), palette: P("#8a6a40", "#a07c4c", "#5a4228", "#000000") }),
   [Material.Platform]: info({ name: "Platform", kind: Kind.Static, oneWay: true, enclosing: true, yields: "wood", ...wooden(80), palette: P("#9e7648", "#82613c", "#b48a56", "#6d5032") }),
@@ -151,7 +155,9 @@ export const MATERIALS: Record<Material, MaterialInfo> = {
   [Material.Cauldron]: info({ name: "Cauldron", kind: Kind.Static, glow: 0.35, palette: P("#2e2c33", "#45424c", "#6fd36a", "#1e1d22") }),
   [Material.Torch]: info({ name: "Torch", kind: Kind.Static, glow: 1, yields: "wood", palette: P("#704f31", "#f0b85a", "#fff3c4", "#db863e") }),
   [Material.Scaffold]: info({ name: "Scaffold", kind: Kind.Static, oneWay: true, ...wooden(60), palette: P("#b58f5a", "#9e7a48", "#6d5032", "#c9a46c") }),
-  [Material.ScaffoldPole]: info({ name: "Scaffold pole", kind: Kind.Static, ...wooden(60), palette: P("#a0855a", "#8a7048", "#6d5032", "#b8996a") })
+  [Material.ScaffoldPole]: info({ name: "Scaffold pole", kind: Kind.Static, ...wooden(60), palette: P("#a0855a", "#8a7048", "#6d5032", "#b8996a") }),
+  [Material.Beam]: info({ name: "Beam", kind: Kind.Static, ...wooden(150), palette: P("#5e4228", "#4e3722", "#704f31", "#3e2b1a") }),
+  [Material.Spoil]: info({ name: "Spoil", kind: Kind.Powder, density: 3, bodySolid: true, yields: "dirt", palette: P("#7a5c40", "#6b4f35", "#86684a", "#5f6066") })
 };
 
 /** Back walls: drawn behind cells, never collided with. Built walls make rooms. */
