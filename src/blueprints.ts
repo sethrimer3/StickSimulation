@@ -8,7 +8,7 @@
  */
 import { Material, WallKind, type Resource } from "./materials";
 
-export type FurnitureKind = "bed" | "shelf" | "desk" | "cauldron";
+export type FurnitureKind = "bed" | "shelf" | "desk" | "cauldron" | "furnace" | "anvil";
 
 export interface BlueprintCell { dx: number; dy: number; m: Material | null; wall: WallKind }
 
@@ -105,6 +105,45 @@ class Furnisher {
       for (let x = 0; x < row.length; x++) if (row[x] === "#") this.cell(dx + x, y - rows.length + r, Material.Cauldron);
     });
     this.spots.push({ kind: "cauldron", dx: dx + 8, dy: y });
+  }
+
+  /** The forge's brick furnace, 26 wide and 30 tall, embers glowing in its mouth. */
+  furnace(dx: number): void {
+    const y = this.floorDy;
+    for (let r = 1; r <= 30; r++) {
+      const w = r > 24 ? 18 : 26;
+      const off = r > 24 ? 4 : 0;
+      for (let x = 0; x < w; x++) {
+        const mouth = r <= 9 && x >= 7 && x < 19;
+        const embers = mouth && r <= 2;
+        if (embers) this.cell(dx + off + x, y - r, Material.Hearth);
+        else if (!mouth) this.cell(dx + off + x, y - r, Material.Furnace);
+      }
+    }
+    this.spots.push({ kind: "furnace", dx: dx + 32, dy: y });
+  }
+
+  /** An anvil on a wooden block, 14 wide. */
+  anvil(dx: number): void {
+    const y = this.floorDy;
+    const rows = [
+      "##############",
+      " ############ ",
+      "    ######    ",
+      "    ######    ",
+      "   ########   ",
+      "  ##########  "
+    ];
+    rows.forEach((row, r) => {
+      for (let x = 0; x < row.length; x++) if (row[x] === "#") this.cell(dx + x, y - 9 + r, Material.Anvil);
+    });
+    for (let r = 1; r <= 3; r++) for (let x = 2; x < 12; x++) this.cell(dx + x, y - r, Material.Desk);
+    this.spots.push({ kind: "anvil", dx: dx + 20, dy: y });
+  }
+
+  /** A brick chimney from the furnace up through the roof. */
+  chimney(dx: number, fromDy: number, toDy: number): void {
+    for (let yy = toDy; yy <= fromDy; yy++) for (let x = 0; x < 8; x++) this.cell(dx + x, yy, Material.Brick);
   }
 
   torch(dx: number, dyFromFloor: number): void {
@@ -255,6 +294,24 @@ add({
 });
 
 add({
+  id: "forge",
+  name: "Forge",
+  description: "A brick furnace where forge hands smelt the mine's ore into bars.",
+  width: 104,
+  cost: { wood: 120, stone: 60 },
+  stories: [{ height: STORY, furnish: (f) => { f.furnace(10); f.chimney(19, f.floorDy - 31, f.floorDy - STORY - 30); f.torch(62, 42); } }]
+});
+
+add({
+  id: "smithy",
+  name: "Smithy",
+  description: "Anvils where smiths work bars; every ten bars of a metal make a Smithy point.",
+  width: 100,
+  cost: { wood: 110, stone: 20 },
+  stories: [{ height: STORY, furnish: (f) => { f.anvil(14); f.anvil(52); f.desk(74); f.torch(48, 42); } }]
+});
+
+add({
   id: "grandLibrary",
   name: "Grand library",
   description: "Two floors of stacks over a lab with twin cauldrons.",
@@ -270,7 +327,7 @@ add({
 
 /** Cells in one of each piece of furniture, so rooms can count them. */
 export const FURNITURE_CELLS: Record<FurnitureKind, number> = (() => {
-  const counts = { bed: 0, shelf: 0, desk: 0, cauldron: 0 } as Record<FurnitureKind, number>;
+  const counts = { bed: 0, shelf: 0, desk: 0, cauldron: 0, furnace: 0, anvil: 0 } as Record<FurnitureKind, number>;
   for (const kind of Object.keys(counts) as FurnitureKind[]) {
     const g: Grid = new Map();
     const f = new Furnisher(g, [], 0, 100, 100, WallKind.None);
@@ -292,6 +349,8 @@ export function cellCost(m: Material | null, wall: WallKind): Partial<Record<Res
     case Material.Scaffold: case Material.ScaffoldPole: add("wood", 0.005); break;
     case Material.Brick: add("stone", 0.05); break;
     case Material.Cauldron: add("stone", 0.1); break;
+    case Material.Furnace: add("stone", 0.06); break;
+    case Material.Anvil: add("stone", 0.1); break;
     default: break;
   }
   if (wall === WallKind.PlankWall) add("wood", 0.006);

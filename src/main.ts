@@ -5,6 +5,7 @@ import { Material } from "./materials";
 import { clearSave, loadSave, saveAll } from "./persistence";
 import { render } from "./render";
 import { project } from "./research";
+import { SMITHY_UPGRADES } from "./smithy";
 import { Terrain, WORLD_H, WORLD_W } from "./terrain";
 import { Weather } from "./weather";
 import { dayNumber, LOGICAL_SIZE, TICK_HZ } from "./world";
@@ -28,6 +29,8 @@ const ui = {
   freeCam: $<HTMLButtonElement>("#free-cam"),
   researchNow: $("#research-now"),
   researchList: $("#research-list"),
+  smithyNow: $("#smithy-now"),
+  smithyList: $("#smithy-list"),
   rooms: $("#rooms"),
   catchup: $("#catchup"),
   motion: $<HTMLButtonElement>("#motion"),
@@ -295,6 +298,38 @@ ui.settlers.addEventListener("change", (event) => {
   renderSettlerList(true);
 });
 
+const RESOURCE_LABEL: Record<string, string> = {
+  copper: "copper ore", silver: "silver ore", gold: "gold ore",
+  copperBar: "copper bars", silverBar: "silver bars", goldBar: "gold bars"
+};
+
+let smithyKey = "";
+function renderSmithy(): void {
+  const forging = colony.roomsOf("forge").length > 0;
+  const smithing = colony.roomsOf("smithy").length > 0;
+  const ore = `${Math.floor(colony.forgeOre.copper)} copper, ${Math.floor(colony.forgeOre.silver)} silver, ${Math.floor(colony.forgeOre.gold)} gold`;
+  const points = `${colony.smithyPoints.copper} copper, ${colony.smithyPoints.silver} silver, ${colony.smithyPoints.gold} gold`;
+  const work = `${colony.smithyWork.copper}/10 copper, ${colony.smithyWork.silver}/10 silver, ${colony.smithyWork.gold}/10 gold`;
+  const html = !forging && !smithing
+    ? "<em>The builders put up a forge once ore is coming up from the mine, then a smithy.</em>"
+    : `<div>Ore in the forge: <strong>${ore}</strong></div><div>Bars worked: ${work}</div><div>Smithy points: <strong>${points}</strong></div>`
+      + (colony.forged.size ? `<div class="hint">Made: ${[...colony.forged].map((id) => SMITHY_UPGRADES.find((u) => u.id === id)?.name ?? id).join(", ")}</div>` : "");
+  if (ui.smithyNow.innerHTML !== html) ui.smithyNow.innerHTML = html;
+  const options = colony.smithyAvailable();
+  const key = options.map((o) => o.id + colony.canForge(o)).join() + colony.chosenSmithy;
+  if (key === smithyKey) return;
+  smithyKey = key;
+  ui.smithyList.innerHTML = options.map((o) => `<button type="button" data-upgrade="${o.id}" aria-pressed="${colony.chosenSmithy === o.id}" class="${colony.canForge(o) ? "" : "short"}" title="${o.description}">
+      <span>${o.name}</span><small>${o.points} ${o.metal} point${o.points > 1 ? "s" : ""} · ${o.description}</small></button>`).join("") || "<em>Every tool has been made.</em>";
+}
+ui.smithyList.addEventListener("click", (event) => {
+  const b = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-upgrade]");
+  if (!b?.dataset.upgrade) return;
+  colony.chosenSmithy = colony.chosenSmithy === b.dataset.upgrade ? null : b.dataset.upgrade;
+  smithyKey = "";
+  renderSmithy();
+});
+
 let researchKey = "";
 function renderResearch(): void {
   const r = colony.research;
@@ -307,7 +342,7 @@ function renderResearch(): void {
   if (key === researchKey) return;
   researchKey = key;
   ui.researchList.innerHTML = options.map((o) => {
-    const cost = [`${o.knowledge} knowledge`, ...Object.entries(o.resources).map(([k, n]) => `${n} ${k}`)].join(", ");
+    const cost = [`${o.knowledge} knowledge`, ...Object.entries(o.resources).map(([k, n]) => `${n} ${RESOURCE_LABEL[k] ?? k}`)].join(", ");
     return `<button type="button" data-project="${o.id}" aria-pressed="${colony.chosen === o.id}" class="${colony.canAfford(o) ? "" : "short"}" title="${o.description}">
       <span>${o.name}</span><small>${cost}</small></button>`;
   }).join("") || "<em>Everything has been researched.</em>";
@@ -320,8 +355,8 @@ ui.researchList.addEventListener("click", (event) => {
   renderResearch();
 });
 
-const ROOM_LABEL = { home: "Home", library: "Library", lab: "Alchemy lab", empty: "Empty room" };
-const BUILDING_NAME: Record<string, string> = { cabin: "cabin", library: "library", bunkhouse: "bunkhouse", stoneCottage: "stone cottage", grandLibrary: "grand library" };
+const ROOM_LABEL = { home: "Home", library: "Library", lab: "Alchemy lab", forge: "Forge", smithy: "Smithy", empty: "Empty room" };
+const BUILDING_NAME: Record<string, string> = { cabin: "cabin", library: "library", bunkhouse: "bunkhouse", stoneCottage: "stone cottage", grandLibrary: "grand library", forge: "forge", smithy: "smithy" };
 function renderRooms(): void {
   const lines = colony.rooms.map((r) => {
     const site = colony.sites[r.site];
@@ -340,12 +375,14 @@ function updatePanel(): void {
   ui.age.textContent = `Day ${dayNumber(colony.elapsed)}`;
   ui.people.textContent = `${colony.population} · ${colony.bedSpots().length} beds`;
   ui.knowledge.textContent = colony.knowledge.toFixed(1);
-  ui.supplies.textContent = RESOURCES.filter((r) => r !== "dirt").map((r) => `${Math.floor(colony.resources[r])} ${r}`).join(" · ");
+  ui.supplies.textContent = RESOURCES.filter((r) => r !== "dirt")
+    .map((r) => `${Math.floor(colony.resources[r])} ${RESOURCE_LABEL[r] ?? r}`).join(" · ");
   ui.event.textContent = colony.events[colony.events.length - 1] ?? "";
   ui.catchup.hidden = bankTicks <= 0;
   ui.catchup.textContent = `Catching up on time away… ${Math.ceil(bankTicks / TICK_HZ)} s`;
   renderSettlerList();
   renderResearch();
+  renderSmithy();
   renderRooms();
 }
 

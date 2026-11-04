@@ -9,7 +9,7 @@ import { isBuiltWall, Material, MATERIALS, MATERIAL_LIST } from "./materials";
 import { FURNITURE_CELLS } from "./blueprints";
 import type { Terrain } from "./terrain";
 
-export type RoomKind = "home" | "library" | "lab" | "empty";
+export type RoomKind = "home" | "library" | "lab" | "forge" | "smithy" | "empty";
 
 export interface RoomCheck {
   valid: boolean;
@@ -21,13 +21,15 @@ export interface RoomCheck {
   shelves: number;
   desks: number;
   cauldrons: number;
+  furnaces: number;
+  anvils: number;
 }
 
 const ENCLOSING = MATERIAL_LIST.map((m) => MATERIALS[m].enclosing);
 
 /** Check the room containing (sx, sy), which must fit inside the given box. */
 export function checkRoom(t: Terrain, sx: number, sy: number, box: { x0: number; y0: number; x1: number; y1: number }): RoomCheck {
-  const result: RoomCheck = { valid: false, reason: "", kind: "empty", area: 0, beds: 0, shelves: 0, desks: 0, cauldrons: 0 };
+  const result: RoomCheck = { valid: false, reason: "", kind: "empty", area: 0, beds: 0, shelves: 0, desks: 0, cauldrons: 0, furnaces: 0, anvils: 0 };
   if (ENCLOSING[t.get(sx, sy)]) { result.reason = "Filled in"; return result; }
   const seen = new Set<number>();
   const stack = [t.index(sx, sy)];
@@ -63,7 +65,10 @@ export function checkRoom(t: Terrain, sx: number, sy: number, box: { x0: number;
   result.shelves = pieces(Material.Bookshelf, FURNITURE_CELLS.shelf);
   result.desks = pieces(Material.Desk, FURNITURE_CELLS.desk);
   result.cauldrons = pieces(Material.Cauldron, FURNITURE_CELLS.cauldron);
-  result.kind = result.cauldrons > 0 ? "lab" : result.shelves > 0 ? "library" : result.beds > 0 ? "home" : "empty";
+  result.furnaces = pieces(Material.Furnace, FURNITURE_CELLS.furnace);
+  result.anvils = pieces(Material.Anvil, FURNITURE_CELLS.anvil);
+  result.kind = result.cauldrons > 0 ? "lab" : result.furnaces > 0 ? "forge" : result.anvils > 0 ? "smithy"
+    : result.shelves > 0 ? "library" : result.beds > 0 ? "home" : "empty";
   if (missingWall > 0) { result.reason = "Missing back wall"; return result; }
   if (!entrance) { result.reason = "No door"; return result; }
   if (result.area < 1200) { result.reason = "Too small"; return result; }

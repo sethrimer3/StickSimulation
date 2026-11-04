@@ -200,6 +200,16 @@ function cellColor(t: Terrain, m: Material, x: number, y: number, i: number, now
       // Rough boards with a dark underside.
       if (below !== m && below !== Material.ScaffoldPole) return pal[2];
       return x % 5 === 0 ? pal[1] : pal[0];
+    case Material.Furnace: {
+      // Brick courses; the edges of the mouth glow hot.
+      const row = Math.floor(y / 3);
+      if (y % 3 === 0 || (x + (row % 2) * 3) % 6 === 0) return pal[3];
+      const nearMouth = left === Material.Empty || right === Material.Empty || below === Material.Empty || left === Material.Hearth || right === Material.Hearth;
+      return nearMouth ? mix(pal[1], C.fire[1], 0.35 + ((x + flick) & 1) * 0.2) : pal[(x + row) % 2];
+    }
+    case Material.Anvil:
+      if (above !== m) return pal[3];
+      return left !== m || right !== m ? pal[2] : pal[(x + y) % 2];
     case Material.Beam:
       return (x + y) % 7 === 0 ? pal[2] : pal[(x + y) & 1];
     case Material.ScaffoldPole:
@@ -325,6 +335,52 @@ function drawHoist(s: PixelSurface, v: View): void {
   s.set(wx, wy, C.bucketRim);
 }
 
+/** The forge's ore heap and the smithy's bars, sparks flying while the smiths work. */
+function drawForgeAndSmithy(s: PixelSurface, v: View): void {
+  const col = v.colony;
+  const oreColor = { copper: PALETTES[Material.CopperOre][2], silver: PALETTES[Material.SilverOre][2], gold: PALETTES[Material.GoldOre][2] };
+  const barColor = { copper: rgb("#d07a3e"), silver: rgb("#dfe6ea"), gold: rgb("#f2c84a") };
+  for (const r of col.roomsOf("forge")) {
+    const furnace = col.rooms[r].spots.find((p) => p.kind === "furnace");
+    if (!furnace) continue;
+    // A heap of ore beside the furnace, coloured by what's in it.
+    const total = col.forgeOre.copper + col.forgeOre.silver + col.forgeOre.gold;
+    const n = Math.min(60, Math.round(total * 1.5));
+    for (let k = 0; k < n; k++) {
+      const h = Math.floor(Math.sqrt(k));
+      const ox = Math.round((hash2(k, 5) - 0.5) * (14 - h * 2));
+      const pick = k % 5 === 0 && col.forgeOre.gold > 0 ? "gold" : k % 3 === 0 && col.forgeOre.silver > 0 ? "silver" : "copper";
+      s.set(Math.round(furnace.x + 8 + ox - v.camX), Math.round(furnace.y - 1 - h - v.camY), oreColor[pick]);
+    }
+  }
+  for (const r of col.roomsOf("smithy")) {
+    const spots = col.rooms[r].spots;
+    const bench = spots.find((p) => p.kind === "desk");
+    if (bench) {
+      // Stacks of bars on the bench, a few of each metal.
+      let k = 0;
+      for (const m of ["copper", "silver", "gold"] as const) {
+        const bars = Math.min(6, Math.floor(col.resources[`${m}Bar`]));
+        for (let b = 0; b < bars; b++, k++) {
+          const bx = Math.round(bench.x - 8 + (k % 6) * 3 - v.camX);
+          const by = Math.round(bench.y - 15 - Math.floor(k / 6) * 2 - v.camY);
+          s.rect(bx, by, 3, 1, barColor[m]);
+        }
+      }
+    }
+    if (col.ticksSince(col.smithBusyAt) < 25) {
+      for (const anvil of spots.filter((p) => p.kind === "anvil")) {
+        for (let k = 0; k < 4; k++) {
+          const t = (v.now * 3 + k * 0.27) % 1;
+          const sx = anvil.x - 13 + Math.round((hash2(k, Math.floor(v.now * 3)) - 0.5) * 14 * t);
+          const sy = anvil.y - 10 - Math.round(Math.sin(t * Math.PI) * 6);
+          s.set(Math.round(sx - v.camX), Math.round(sy - v.camY), C.fire[3 - (k & 1)]);
+        }
+      }
+    }
+  }
+}
+
 function drawHeld(s: PixelSurface, st: Settler, ox: number, oy: number): void {
   const p = st.body.p;
   const hand = p[Joint.HandR];
@@ -358,6 +414,12 @@ function drawHeld(s: PixelSurface, st: Settler, ox: number, oy: number): void {
     case "book":
       s.rect(hx - 1, hy - 2, 3, 3, C.book[st.name.length % C.book.length]);
       break;
+    case "shovel": {
+      const ex = hx + dx * 7; const ey = hy + dy * 7;
+      s.line(hx, hy, ex, ey, C.handle);
+      s.rect(ex - 1, ey - 1, 3, 3, C.metalDark);
+      break;
+    }
     case "flask":
       s.set(hx, hy - 1, C.brew[0]);
       s.set(hx, hy - 2, C.metal);
@@ -472,7 +534,7 @@ function computeLight(v: View): void {
   for (const st of v.colony.settlers) {
     const bx = Math.floor(st.body.feetX / BLOCK) - bx0;
     const by = Math.floor((st.body.feetY - 8) / BLOCK) - by0;
-    if (bx >= 0 && by >= 0 && bx < LB && by < LB) emitLight[by * LB + bx] = Math.max(emitLight[by * LB + bx], 0.55);
+    if (bx >= 0 && by >= 0 && bx < LB && by < LB) emitLight[by * LB + bx] = Math.max(emitLight[by * LB + bx], v.colony.forged.has("lanterns") ? 0.85 : 0.55);
   }
   spread(skyLight, 0.08, 0.24, 12);
   spread(emitLight, 0.075, 0.22, 14);
@@ -574,6 +636,7 @@ export function render(ctx: CanvasRenderingContext2D, v: View): void {
   drawWorld(s, v);
   drawPiles(s, v);
   drawHoist(s, v);
+  drawForgeAndSmithy(s, v);
   for (const st of v.colony.settlers) drawSettler(s, st, v);
   computeLight(v);
   s.present(ctx, makeLight(v, sun));

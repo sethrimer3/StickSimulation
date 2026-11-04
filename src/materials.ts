@@ -43,7 +43,11 @@ export enum Material {
   /** Timber of the mine's headframe: stands over the shaft without blocking anyone. */
   Beam,
   /** Dug dirt and rubble tipped on the spoil heap: loose, it slides and piles. */
-  Spoil
+  Spoil,
+  /** The forge's brick furnace. */
+  Furnace,
+  /** The smithy's anvil. */
+  Anvil
 }
 
 export enum Kind {
@@ -59,7 +63,8 @@ export enum Kind {
 }
 
 /** What a stickman gets for digging or chopping a cell. */
-export type Resource = "wood" | "stone" | "copper" | "silver" | "gold" | "dirt" | "sand";
+/** Ore comes up from the mine; the forge smelts it into bars. */
+export type Resource = "wood" | "stone" | "copper" | "silver" | "gold" | "dirt" | "sand" | "copperBar" | "silverBar" | "goldBar";
 
 export interface MaterialInfo {
   name: string;
@@ -157,6 +162,8 @@ export const MATERIALS: Record<Material, MaterialInfo> = {
   [Material.Scaffold]: info({ name: "Scaffold", kind: Kind.Static, oneWay: true, ...wooden(60), palette: P("#b58f5a", "#9e7a48", "#6d5032", "#c9a46c") }),
   [Material.ScaffoldPole]: info({ name: "Scaffold pole", kind: Kind.Static, ...wooden(60), palette: P("#a0855a", "#8a7048", "#6d5032", "#b8996a") }),
   [Material.Beam]: info({ name: "Beam", kind: Kind.Static, ...wooden(150), palette: P("#5e4228", "#4e3722", "#704f31", "#3e2b1a") }),
+  [Material.Furnace]: info({ name: "Furnace", kind: Kind.Static, glow: 0.15, palette: P("#7a3e2e", "#8c4a36", "#5a2c22", "#3a2420") }),
+  [Material.Anvil]: info({ name: "Anvil", kind: Kind.Static, palette: P("#4a4e56", "#6a707a", "#2e3036", "#8a919c") }),
   [Material.Spoil]: info({ name: "Spoil", kind: Kind.Powder, density: 3, bodySolid: true, yields: "dirt", palette: P("#7a5c40", "#6b4f35", "#86684a", "#5f6066") })
 };
 

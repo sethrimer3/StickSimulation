@@ -15,20 +15,22 @@ import { BLUEPRINTS, cellCost, type Blueprint, type FurnitureKind } from "./blue
 import { Kind, Material, MATERIALS, WallKind, type Resource } from "./materials";
 import { Navigator, type NavNode, type Waypoint } from "./nav";
 import { PROJECTS, project, type Project } from "./research";
+import { BARS_PER_POINT, FORGE_CAP, METALS, ORE_PER_BAR, SMITHY_UPGRADES, smithyUpgrade, type Metal, type SmithyUpgrade } from "./smithy";
 import { checkRoom, type RoomCheck } from "./rooms";
 import { Joint, StickBody, type BodyControl } from "./stickman";
 import { COLONY_X, groundHeight, LAKE_FROM, LAKE_TO, MINE_X, type Terrain } from "./terrain";
 import { fellTree, initialTrees, stampTree, trunkLeft, type TreeState } from "./trees";
 import { daylight, DAY_SECONDS, isNight, TICK_HZ } from "./world";
 
-export type Role = "builder" | "miner" | "woodcutter" | "scholar" | "alchemist";
-export const ROLES: Role[] = ["builder", "miner", "woodcutter", "scholar", "alchemist"];
+export type Role = "builder" | "miner" | "woodcutter" | "scholar" | "alchemist" | "smelter" | "smith";
+export const ROLES: Role[] = ["builder", "miner", "woodcutter", "scholar", "alchemist", "smelter", "smith"];
 export const ROLE_LABEL: Record<Role, string> = {
-  builder: "Builder", miner: "Miner", woodcutter: "Woodcutter", scholar: "Scholar", alchemist: "Alchemist"
+  builder: "Builder", miner: "Miner", woodcutter: "Woodcutter", scholar: "Scholar", alchemist: "Alchemist",
+  smelter: "Forge hand", smith: "Smith"
 };
-export const RESOURCES: Resource[] = ["wood", "stone", "copper", "silver", "gold", "sand", "dirt"];
+export const RESOURCES: Resource[] = ["wood", "stone", "copper", "silver", "gold", "copperBar", "silverBar", "goldBar", "sand", "dirt"];
 /** The order new settlers' roles are picked in, as the colony grows. */
-const ROLE_CYCLE: Role[] = ["builder", "miner", "woodcutter", "scholar", "alchemist", "woodcutter", "miner", "scholar", "builder", "miner", "woodcutter", "scholar", "alchemist", "miner", "builder"];
+const ROLE_CYCLE: Role[] = ["builder", "miner", "woodcutter", "scholar", "alchemist", "smelter", "smith", "miner", "woodcutter", "scholar", "builder", "miner", "smelter", "scholar", "alchemist", "smith", "miner", "builder"];
 
 export const YARD_X = MINE_X - 18;
 /** Where the spoil heap is tipped, east of the shaft. */
@@ -49,12 +51,12 @@ const BUILDING_GAP = 36;
 /** Rows between scaffold decks. */
 const DECK_EVERY = 18;
 /** What one dug pixel is worth. */
-const YIELD: Amounts = { wood: 0.3, stone: 0.08, copper: 0.5, silver: 0.5, gold: 0.5, sand: 0.08, dirt: 0.05 };
+const YIELD: Amounts = { wood: 0.3, stone: 0.08, copper: 0.5, silver: 0.5, gold: 0.5, copperBar: 0, silverBar: 0, goldBar: 0, sand: 0.08, dirt: 0.05 };
 const ARRIVAL_SECONDS = 90;
 const SAVE_VERSION = 4;
 
 type Amounts = Record<Resource, number>;
-const emptyAmounts = (): Amounts => ({ wood: 0, stone: 0, copper: 0, silver: 0, gold: 0, sand: 0, dirt: 0 });
+const emptyAmounts = (): Amounts => ({ wood: 0, stone: 0, copper: 0, silver: 0, gold: 0, copperBar: 0, silverBar: 0, goldBar: 0, sand: 0, dirt: 0 });
 
 // ---- names -------------------------------------------------------------------
 
@@ -138,6 +140,8 @@ type Task =
   | { kind: "build"; op: number; phase: "go" | "work"; timer: number; idle: number }
   | { kind: "haul"; to: number; phase: "go" }
   | { kind: "bucket"; phase: "go" | "tip"; timer: number }
+  | { kind: "smelt"; phase: "toYard" | "take" | "toForge" | "drop" | "toFurnace" | "shovel"; timer: number; room: number; furnace: Spot; metal: Metal }
+  | { kind: "smith"; phase: "toAnvil" | "hammer"; timer: number; room: number; anvil: Spot; metal: Metal }
   | { kind: "chop"; tree: number; phase: "go" | "work"; timer: number; strikes: number }
   | { kind: "read"; room: number; phase: "goShelf" | "take" | "goDesk" | "read" | "goBack" | "return"; timer: number; shelf: Spot; desk: Spot }
   | { kind: "research"; room: number; phase: "goCauldron" | "stir" | "goDesk" | "write"; timer: number; cauldron: Spot; desk: Spot }
@@ -168,7 +172,7 @@ export class Settler {
   bed: Spot | null = null;
   relaxed = false;
   /** Holding something to draw (book, log, ore, tool). */
-  holding: "none" | "book" | "log" | "ore" | "pick" | "hammer" | "axe" | "flask" = "none";
+  holding: "none" | "book" | "log" | "ore" | "pick" | "hammer" | "axe" | "flask" | "shovel" = "none";
 
   constructor(readonly name: string, public role: Role, x: number, y: number) {
     this.body = new StickBody(x, y);
@@ -266,6 +270,11 @@ export interface ColonySave {
   sites: SiteSave[];
   trees: TreeState[];
   caves?: number[];
+  forgeOre?: Record<Metal, number>;
+  smithyWork?: Record<Metal, number>;
+  smithyPoints?: Record<Metal, number>;
+  forged?: string[];
+  chosenSmithy?: string | null;
   nextArrival: number;
   hired: number;
   events: string[];
@@ -298,6 +307,19 @@ export class Colony {
   research: { id: string; progress: number } | null = null;
   /** The player's pick for the next research, if any. */
   chosen: string | null = null;
+  /** Ore carried into the forge, waiting to be smelted. */
+  forgeOre: Record<Metal, number> = { copper: 0, silver: 0, gold: 0 };
+  /** Bars worked toward each metal's next Smithy point, and the points earned. */
+  smithyWork: Record<Metal, number> = { copper: 0, silver: 0, gold: 0 };
+  smithyPoints: Record<Metal, number> = { copper: 0, silver: 0, gold: 0 };
+  /** Smithy upgrades bought, and the player's pick for the next. */
+  forged = new Set<string>();
+  chosenSmithy: string | null = null;
+  /** When the furnace and anvils last saw work (for smoke, sparks and glow). */
+  forgeBusyAt = -1e9;
+  smithBusyAt = -1e9;
+  /** Slow progress of a trade nobody holds (as in the Tower Defense Mine). */
+  private idleTrade = { smelt: 0, smith: 0 };
   elapsed = DAY_SECONDS * 0.12;
   rooms: RoomInfo[] = [];
   events: string[] = [];
@@ -319,6 +341,8 @@ export class Colony {
   hoist = { y: 0, phase: "idle" as "idle" | "down" | "load" | "up" | "tip", timer: 0, target: 0, load: emptyAmounts(), queue: [] as Array<{ y: number; load: Amounts }> };
   private mineKey = "";
   private claims = new Map<string, string>();
+  /** Places where a building had to be abandoned, avoided for a while. */
+  private badSites: Array<{ x0: number; x1: number; until: number }> = [];
   /** Ops a settler gave up on ("op|name"), skipped by them until the given tick. */
   private blocked = new Map<string, number>();
   private roomVersion = -1;
@@ -395,6 +419,15 @@ export class Colony {
     this.chosen = save.chosen;
     this.trees = save.trees;
     this.caves = Array.isArray(save.caves) ? save.caves.filter((n) => Number.isInteger(n)) : [];
+    const metals = (v: unknown): Record<Metal, number> => {
+      const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
+      return { copper: Number(o.copper) || 0, silver: Number(o.silver) || 0, gold: Number(o.gold) || 0 };
+    };
+    this.forgeOre = metals(save.forgeOre);
+    this.smithyWork = metals(save.smithyWork);
+    this.smithyPoints = metals(save.smithyPoints);
+    this.forged = new Set(Array.isArray(save.forged) ? save.forged.filter((x) => typeof x === "string") : []);
+    this.chosenSmithy = typeof save.chosenSmithy === "string" ? save.chosenSmithy : null;
     this.nextArrival = save.nextArrival;
     this.hired = save.hired;
     this.events = save.events.slice(-6);
@@ -426,6 +459,11 @@ export class Colony {
       sites: this.sites.map((s) => ({ blueprint: s.blueprint, x: s.x, y: s.y, done: s.done })),
       trees: this.trees,
       caves: this.caves,
+      forgeOre: this.forgeOre,
+      smithyWork: this.smithyWork,
+      smithyPoints: this.smithyPoints,
+      forged: [...this.forged],
+      chosenSmithy: this.chosenSmithy,
       nextArrival: this.nextArrival,
       hired: this.hired,
       events: this.events
@@ -463,6 +501,157 @@ export class Colony {
   canAfford(p: Project): boolean {
     if (this.knowledge < p.knowledge) return false;
     return Object.entries(p.resources).every(([r, n]) => this.resources[r as Resource] >= (n ?? 0));
+  }
+
+  roomsOf(kind: RoomCheck["kind"]): number[] {
+    return this.rooms.map((r, i) => (r.check.valid && r.check.kind === kind ? i : -1)).filter((i) => i >= 0);
+  }
+
+  /** Ticks since a moment recorded in ticks. */
+  ticksSince(tick: number): number {
+    return this.ticks - tick;
+  }
+
+  has(id: string): boolean {
+    return this.known.has(id) || this.forged.has(id);
+  }
+
+  // ---- forge and smithy ---------------------------------------------------------------
+
+  smithyAvailable(): SmithyUpgrade[] {
+    return SMITHY_UPGRADES.filter((u) => !this.forged.has(u.id) && (!u.requires || this.forged.has(u.requires)));
+  }
+
+  canForge(u: SmithyUpgrade): boolean {
+    return this.smithyPoints[u.metal] >= u.points;
+  }
+
+  /** Spend Smithy points: the player's pick, or the cheapest affordable. */
+  private buySmithy(): void {
+    const options = this.smithyAvailable();
+    let pick = this.chosenSmithy ? options.find((u) => u.id === this.chosenSmithy) : undefined;
+    if (!pick && !this.chosenSmithy) pick = options.filter((u) => this.canForge(u)).sort((a, b) => a.points - b.points)[0];
+    if (!pick || !this.canForge(pick)) return;
+    this.smithyPoints[pick.metal] -= pick.points;
+    this.forged.add(pick.id);
+    if (this.chosenSmithy === pick.id) this.chosenSmithy = null;
+    this.log(`The smiths finished ${pick.name.toLowerCase()}.`);
+  }
+
+  /** The most precious metal there's enough ore of for a bar. */
+  private smeltable(ore: Record<Metal, number>): Metal | null {
+    for (const m of ["gold", "silver", "copper"] as Metal[]) if (ore[m] >= ORE_PER_BAR[m]) return m;
+    return null;
+  }
+
+  private smelt(metal: Metal): void {
+    this.forgeOre[metal] -= ORE_PER_BAR[metal];
+    this.resources[`${metal}Bar` as Resource] += 1;
+    this.forgeBusyAt = this.ticks;
+  }
+
+  private workBar(metal: Metal): void {
+    this.resources[`${metal}Bar` as Resource] -= 1;
+    this.smithyWork[metal] += 1;
+    this.smithBusyAt = this.ticks;
+    if (this.smithyWork[metal] >= BARS_PER_POINT) {
+      this.smithyWork[metal] -= BARS_PER_POINT;
+      this.smithyPoints[metal] += 1;
+      this.log(`The smiths earned a ${metal} Smithy point.`);
+      this.buySmithy();
+    }
+  }
+
+  /** The metal with bars waiting, most precious first. */
+  private barToWork(): Metal | null {
+    for (const m of ["gold", "silver", "copper"] as Metal[]) if (this.resources[`${m}Bar` as Resource] >= 1) return m;
+    return null;
+  }
+
+  /**
+   * A trade nobody is put to still gets done, slowly (a quarter pace), as
+   * in the Tower Defense Mine: ore drifts from the yard into the forge and
+   * bars across to the anvils.
+   */
+  private idleTrades(seconds: number): void {
+    if (this.roomsOf("forge").length && !this.settlers.some((s) => s.role === "smelter")) {
+      this.idleTrade.smelt += seconds;
+      if (this.idleTrade.smelt >= 30) {
+        this.idleTrade.smelt = 0;
+        for (const m of ["gold", "silver", "copper"] as Metal[]) {
+          const take = Math.min(ORE_PER_BAR[m], this.resources[m]);
+          if (this.forgeOre[m] < ORE_PER_BAR[m] && take > 0) { this.resources[m] -= take; this.forgeOre[m] += take; }
+        }
+        const metal = this.smeltable(this.forgeOre);
+        if (metal) this.smelt(metal);
+      }
+    }
+    if (this.roomsOf("smithy").length && !this.settlers.some((s) => s.role === "smith")) {
+      this.idleTrade.smith += seconds;
+      if (this.idleTrade.smith >= 40) {
+        this.idleTrade.smith = 0;
+        const metal = this.barToWork();
+        if (metal) this.workBar(metal);
+      }
+    }
+  }
+
+  /** Smoke from the forge's chimney while the furnace is busy. */
+  private chimneySmoke(): void {
+    if (this.ticks - this.forgeBusyAt > TICK_HZ * 8) return;
+    for (const r of this.roomsOf("forge")) {
+      const site = this.sites[this.rooms[r].site];
+      const bp = BLUEPRINTS[site.blueprint];
+      const oy = site.y - (bp.height - 2);
+      // The chimney's top: first open cell above the brick column.
+      const x = site.x + 22;
+      let y = oy + bp.stories[0].floorDy - 31;
+      while (y > 0 && this.terrain.get(x, y) === Material.Brick) y--;
+      if (this.terrain.get(x, y) === Material.Empty && Math.random() < 0.5) this.terrain.set(x, y, Material.Smoke);
+    }
+  }
+
+  private smeltTask(s: Settler): boolean {
+    const forges = this.roomsOf("forge");
+    if (!forges.length) { s.activity = "No forge yet"; return false; }
+    const room = forges[0];
+    const furnace = this.rooms[room].spots.find((p) => p.kind === "furnace");
+    if (!furnace) return false;
+    const metal = this.smeltable(this.forgeOre);
+    const stocked = METALS.reduce((n, m) => n + this.forgeOre[m], 0);
+    const inYard = METALS.find((m) => this.resources[m] >= 1);
+    if (metal && (stocked >= FORGE_CAP / 2 || !inYard)) {
+      if (!s.goTo(this.nav, this.standNear(furnace.x, furnace.y, 3, 3))) return false;
+      s.task = { kind: "smelt", phase: "toFurnace", timer: 0, room, furnace, metal };
+      s.activity = `Smelting ${metal}`;
+      s.holding = "shovel";
+      return true;
+    }
+    if (inYard && stocked < FORGE_CAP) {
+      if (!s.goTo(this.nav, this.standNear(YARD_X, groundHeight(YARD_X, this.seed), 4, 8))) return false;
+      s.task = { kind: "smelt", phase: "toYard", timer: 0, room, furnace, metal: inYard };
+      s.activity = "Fetching ore from the yard";
+      return true;
+    }
+    s.activity = "Waiting for ore";
+    return false;
+  }
+
+  private smithTask(s: Settler): boolean {
+    const smithies = this.roomsOf("smithy");
+    if (!smithies.length) { s.activity = "No smithy yet"; return false; }
+    const metal = this.barToWork();
+    if (!metal) { s.activity = "Waiting for bars"; return false; }
+    const room = smithies[0];
+    const anvils = this.rooms[room].spots.filter((p) => p.kind === "anvil");
+    if (!anvils.length) return false;
+    const smiths = this.settlers.filter((x) => x.role === "smith");
+    const anvil = anvils[Math.max(0, smiths.indexOf(s)) % anvils.length];
+    if (!s.goTo(this.nav, this.standNear(anvil.x, anvil.y, 2, 3))) return false;
+    s.task = { kind: "smith", phase: "toAnvil", timer: 0, room, anvil, metal };
+    s.activity = `Working a ${metal} bar`;
+    s.holding = "hammer";
+    return true;
   }
 
   labRooms(): number[] {
@@ -801,7 +990,8 @@ export class Colony {
       const overlaps = (lo: number, hi: number): boolean => a < hi && b > lo;
       // Keep well clear of the campfire's flames.
       if (overlaps(COLONY_X - 45, COLONY_X + 45)) return true;
-      if (overlaps(MINE_X - 30, SPOIL_X + 100)) return true;
+      if (overlaps(MINE_X - 30, SPOIL_X + 60)) return true;
+      if (this.badSites.some((b) => b.until > this.ticks && overlaps(b.x0, b.x1))) return true;
       if (overlaps(LAKE_FROM - 12, LAKE_TO + 12)) return true;
       if (overlaps(WOODPILE_X - 6, WOODPILE_X + 6)) return true;
       return this.sites.some((s) => overlaps(s.x - BUILDING_GAP, s.x + BLUEPRINTS[s.blueprint].width + BUILDING_GAP));
@@ -812,7 +1002,7 @@ export class Colony {
         const heights: number[] = [];
         for (let k = 0; k < bp.width; k += 2) heights.push(t.surfaceY(x + k));
         heights.sort((a, b) => a - b);
-        if (heights[heights.length - 1] - heights[0] > 16) continue;
+        if (heights[heights.length - 1] - heights[0] > 8) continue;
         return { x, y: heights[Math.floor(heights.length / 2)] };
       }
     }
@@ -829,6 +1019,10 @@ export class Colony {
       if (this.known.has("bunkhouse")) return "bunkhouse";
       return "cabin";
     }
+    // Once ore is coming up, a forge to smelt it and a smithy to work the bars.
+    const ore = this.resources.copper + this.resources.silver + this.resources.gold;
+    if (built("forge") === 0 && ore >= 8) return "forge";
+    if (built("forge") > 0 && built("smithy") === 0) return "smithy";
     if (this.known.has("grandLibrary") && built("grandLibrary") === 0) return "grandLibrary";
     return null;
   }
@@ -854,9 +1048,23 @@ export class Colony {
     }
     const before = active.cursor;
     while (active.cursor < active.ops.length && opDone(this.terrain, active.ops[active.cursor])) active.cursor++;
-    active.stalled = active.cursor === before ? (active.stalled ?? 0) + 1 : 0;
+    // Count only real stalls: not nights, not waits for materials.
+    const waiting = isNight(this.elapsed)
+      || active.ops.slice(active.cursor, active.cursor + 8).some((o) => this.opShortOf(o) !== null);
+    if (active.cursor !== before) active.stalled = 0;
+    else if (!waiting) active.stalled = (active.stalled ?? 0) + 1;
+    // A building nobody can get on with for eight working minutes (before its scaffolding comes down) is given up.
+    const stuckFor = ((active.stalled ?? 0) * 25) / TICK_HZ;
+    if (stuckFor > 480 && !active.ops[active.cursor]?.cells.every((c) => c.unscaffold)) {
+      const bp = BLUEPRINTS[active.blueprint];
+      this.badSites.push({ x0: active.x - 10, x1: active.x + bp.width + 10, until: this.ticks + TICK_HZ * 60 * 30 });
+      this.sites.splice(this.sites.indexOf(active), 1);
+      this.log(`The builders gave up on the ${bp.name.toLowerCase()} there and will pick another spot.`);
+      this.roomVersion = -1;
+      return;
+    }
     // Safety net: scaffolding nobody can get at for three minutes is knocked out from inside.
-    if (active.stalled > (3 * 60 * TICK_HZ) / 25 && active.ops[active.cursor]?.cells.every((c) => c.unscaffold)) {
+    if ((active.stalled ?? 0) > (3 * 60 * TICK_HZ) / 25 && active.ops[active.cursor]?.cells.every((c) => c.unscaffold)) {
       for (const o of active.ops.slice(active.cursor)) {
         for (const c of o.cells) {
           if (!SCAFFOLD.has(this.terrain.get(c.x, c.y))) continue;
@@ -953,7 +1161,8 @@ export class Colony {
   /** A miner's strike: dig what's in reach, then see whether it opened into a cave. */
   private mineStrike(s: Settler, o: Op): number {
     const before = o.kind === "dig" ? o.cells.filter((c) => !cellDone(this.terrain, c)) : [];
-    const n = this.workOp(s, o, this.known.has("copperPicks") ? 10 : 8, s.carry, { x: 9, up: 24, down: 7 });
+    const picks = (this.known.has("copperPicks") ? 1.25 : 1) * (this.forged.has("sharpPicks") ? 1.25 : 1) * (this.forged.has("silverPicks") ? 1.25 : 1);
+    const n = this.workOp(s, o, Math.round(8 * picks), s.carry, { x: 9, up: 24, down: 7 });
     if (n > 0 && before.length) this.checkForCaves(before.filter((c) => cellDone(this.terrain, c)));
     return n;
   }
@@ -1060,6 +1269,16 @@ export class Colony {
         if (s.carry.wood > 0) { this.haul(s, WOODPILE_X); return; }
         if (this.buildTask(s)) { s.activity = "Helping build (no library yet)"; return; }
         if (this.chopTask(s)) { s.activity = "Chopping wood (no library yet)"; return; }
+        break;
+      case "smelter":
+        if (this.smeltTask(s)) return;
+        if (s.carry.wood > 0) { this.haul(s, WOODPILE_X); return; }
+        if (this.buildTask(s)) { s.activity = "Helping build"; return; }
+        break;
+      case "smith":
+        if (this.smithTask(s)) return;
+        if (s.carry.wood > 0) { this.haul(s, WOODPILE_X); return; }
+        if (this.buildTask(s)) { s.activity = "Helping build"; return; }
         break;
       case "alchemist":
         if (this.researchTask(s)) return;
@@ -1278,6 +1497,65 @@ export class Colony {
         if (task.phase === "go") { if (s.arrived) { task.phase = "wait"; task.timer = TICK_HZ * (3 + Math.random() * 5); } }
         else if (--task.timer <= 0) this.endTask(s);
         break;
+      case "smelt": {
+        if (!this.rooms[task.room]?.check.valid) { this.endTask(s); break; }
+        switch (task.phase) {
+          case "toYard":
+            if (s.arrived) { task.phase = "take"; task.timer = TICK_HZ; s.body.strike(YARD_X); }
+            break;
+          case "take":
+            if (--task.timer > 0) break;
+            {
+              // As in the Tower Defense Mine: gold first, a dozen at a time.
+              let room = 12;
+              for (const m of ["gold", "silver", "copper"] as Metal[]) {
+                const n = Math.min(room, Math.floor(this.resources[m]));
+                this.resources[m] -= n;
+                s.carry[m] += n;
+                room -= n;
+              }
+              s.holding = "ore";
+              if (s.goTo(this.nav, this.standNear(task.furnace.x, task.furnace.y, 3, 3))) { task.phase = "toForge"; s.activity = "Carrying ore to the forge"; }
+              else { for (const m of METALS) { this.resources[m] += s.carry[m]; s.carry[m] = 0; } this.endTask(s); }
+            }
+            break;
+          case "toForge":
+            if (s.arrived) { task.phase = "drop"; task.timer = Math.round(TICK_HZ * 0.6); }
+            break;
+          case "drop":
+            if (--task.timer > 0) break;
+            for (const m of METALS) { this.forgeOre[m] += s.carry[m]; s.carry[m] = 0; }
+            s.holding = "none";
+            this.endTask(s);
+            break;
+          case "toFurnace":
+            if (s.arrived) { task.phase = "shovel"; task.timer = TICK_HZ * 6; s.activity = `Smelting ${task.metal}`; }
+            break;
+          case "shovel":
+            if (task.timer % 30 === 0) s.body.strike(task.furnace.x - 20);
+            this.forgeBusyAt = this.ticks;
+            if (--task.timer <= 0) {
+              if (this.forgeOre[task.metal] >= ORE_PER_BAR[task.metal]) this.smelt(task.metal);
+              this.endTask(s);
+            }
+            break;
+        }
+        break;
+      }
+      case "smith": {
+        if (!this.rooms[task.room]?.check.valid) { this.endTask(s); break; }
+        if (task.phase === "toAnvil") {
+          if (s.arrived) { task.phase = "hammer"; task.timer = TICK_HZ * 8; s.anchorX = s.body.feetX; }
+          break;
+        }
+        if (task.timer % 18 === 0) s.body.strike(task.anvil.x - 20);
+        this.smithBusyAt = this.ticks;
+        if (--task.timer <= 0) {
+          if (this.resources[`${task.metal}Bar` as Resource] >= 1) this.workBar(task.metal);
+          this.endTask(s);
+        }
+        break;
+      }
       case "bucket":
         if (task.phase === "go") {
           if (s.arrived) { task.phase = "tip"; task.timer = TICK_HZ; s.activity = "Tipping ore into the bucket"; s.body.strike(MINE_X); }
@@ -1311,7 +1589,7 @@ export class Colony {
         if (s.body.airborne === 0) s.body.strike(target.x);
         const changed = task.kind === "mine"
           ? this.mineStrike(s, o)
-          : this.workOp(s, o, 32, null, { x: BUILD_REACH_X, up: BUILD_REACH_UP, down: BUILD_REACH_DOWN });
+          : this.workOp(s, o, Math.round(32 * (this.forged.has("hammers") ? 1.25 : 1) * (this.forged.has("goldHammers") ? 1.25 : 1)), null, { x: BUILD_REACH_X, up: BUILD_REACH_UP, down: BUILD_REACH_DOWN });
         if (changed < 0) {
           s.activity = task.kind === "mine" ? "Waiting for wood" : `Waiting for ${this.opShortOf(o) ?? "materials"}`;
           this.endTask(s, TICK_HZ * 4);
@@ -1337,7 +1615,7 @@ export class Colony {
         s.body.strike(tree.x);
         const hand = s.body.p[Joint.HandR];
         if (t.get(hand.x, hand.y) === Material.Empty && Math.random() < 0.5) t.set(hand.x, hand.y - 1, Material.Sawdust);
-        if (++task.strikes >= 10) {
+        if (++task.strikes >= (this.forged.has("steelAxes") ? 7 : 10)) {
           s.carry.wood += fellTree(t, tree);
           tree.growth = -60 - Math.random() * 60;
           this.endTask(s);
@@ -1364,7 +1642,7 @@ export class Colony {
           case "read":
             if (--task.timer <= 0) {
               const shelves = this.rooms[task.room].check.shelves;
-              this.knowledge += (1 + 0.25 * shelves) * knowledgeMult;
+              this.knowledge += (1 + 0.25 * shelves) * knowledgeMult * (this.forged.has("goldQuills") ? 1.25 : 1);
               if (s.goTo(this.nav, this.standNear(task.shelf.x, task.shelf.y, 2, 2))) { task.phase = "goBack"; s.activity = "Returning a book"; }
               else this.endTask(s);
             }
@@ -1490,6 +1768,8 @@ export class Colony {
     if (this.ticks % (TICK_HZ * 30) === 0) { this.mineCursor = 0; this.advanceMineCursor(); }
     if (this.ticks % 25 === 0) {
       this.manageConstruction();
+      this.idleTrades(25 / TICK_HZ);
+      this.chimneySmoke();
       this.updateRooms();
       this.growTrees(25 * dt);
       this.arrivals(25 * dt);
