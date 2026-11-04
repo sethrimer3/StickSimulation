@@ -50,6 +50,8 @@ const BUILD_REACH_DOWN = 20;
 const BUILDING_GAP = 36;
 /** Rows between scaffold decks. */
 const DECK_EVERY = 18;
+/** Rows of trunk a builder cuts through from the ground before a tree falls. */
+const TRUNK_CUT = 16;
 /** What one dug pixel is worth. */
 const YIELD: Amounts = { wood: 0.3, stone: 0.08, copper: 0.5, silver: 0.5, gold: 0.5, copperBar: 0, silverBar: 0, goldBar: 0, sand: 0.08, dirt: 0.05 };
 const ARRIVAL_SECONDS = 90;
@@ -127,6 +129,17 @@ function blocks(cells: CellJob[], bottom: number, left: number, upward: boolean)
   return [...groups.values()]
     .sort((a, b) => (upward ? a.band - b.band : b.band - a.band) || a.block - b.block)
     .map((g) => g.cells.sort((a, b) => (upward ? b.y - a.y : a.y - b.y) || a.x - b.x));
+}
+
+/** A tree whose trunk has a row cut clean through, low down, falls. */
+function trunkCut(t: Terrain, tree: TreeState): boolean {
+  const base = groundHeight(tree.x, t.seed);
+  for (let y = base - TRUNK_CUT; y < base; y++) {
+    let bark = false;
+    for (let x = tree.x - 4; x <= tree.x + 4 && !bark; x++) bark = t.get(x, y) === Material.Bark;
+    if (!bark) return true;
+  }
+  return false;
 }
 
 function opDone(t: Terrain, o: Op): boolean {
@@ -918,10 +931,18 @@ export class Colony {
     // Trees in the way are cut down at the trunk (within reach of the ground);
     // their crowns come down with them (see manageConstruction).
     const treeCells: CellJob[] = [];
-    for (let ty = y - 30; ty < y; ty++) {
-      for (let tx = x - 20; tx < x + bp.width + 20; tx++) {
-        if (t.get(tx, ty) === Material.Bark) treeCells.push({ x: tx, y: ty, m: null, wall: WallKind.None });
-      }
+    // Only as high as a builder on the ground can reach.
+    const seen = new Set<number>();
+    const cut = (tx: number, ty: number): void => {
+      if (t.get(tx, ty) !== Material.Bark || seen.has(ty * 8192 + tx)) return;
+      seen.add(ty * 8192 + tx);
+      treeCells.push({ x: tx, y: ty, m: null, wall: WallKind.None });
+    };
+    for (let ty = y - TRUNK_CUT; ty < y; ty++) for (let tx = x - 20; tx < x + bp.width + 20; tx++) cut(tx, ty);
+    for (const tree of this.trees) {
+      if (!tree.gone || tree.cleared || tree.x <= x - 18 || tree.x >= x + bp.width + 18) continue;
+      const base = groundHeight(tree.x, t.seed);
+      for (let ty = base - TRUNK_CUT; ty < base; ty++) for (let tx = tree.x - 4; tx <= tree.x + 4; tx++) cut(tx, ty);
     }
     for (let k = 0; k < treeCells.length; k += 40) ops.push(op("dig", treeCells.slice(k, k + 40)));
     // Foundation: fill under the floor down to solid ground.
@@ -976,7 +997,10 @@ export class Colony {
     // A pole inside each storey, from its floor to its ceiling.
     for (const story of bp.stories) {
       const floor = oy + story.floorDy;
-      for (let py = floor - 1; py >= floor - story.height; py--) put(x + 6, py, Material.ScaffoldPole);
+      // One at each end, so a chimney or tall furniture can't cut either half off.
+      for (const px of [x + 6, x + bp.width - 7]) {
+        for (let py = floor - 1; py >= floor - story.height; py--) put(px, py, Material.ScaffoldPole);
+      }
     }
     for (const d of decks) for (let cx = left; cx <= right; cx++) put(cx, d, Material.Scaffold);
     return [...cells.values()];
@@ -1041,7 +1065,7 @@ export class Colony {
     }
     // Trees cut through at the trunk fall: their crowns go too.
     for (const tree of this.trees) {
-      if (tree.gone && !tree.cleared && trunkLeft(this.terrain, tree) === 0) {
+      if (tree.gone && !tree.cleared && trunkCut(this.terrain, tree)) {
         this.resources.wood += fellTree(this.terrain, tree);
         tree.cleared = true;
       }

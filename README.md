@@ -28,8 +28,8 @@ No display model or sensor has been selected or purchased. Browser device-orient
 - Fixed-step simulation loop, separated from drawing.
 - Stick Ranger-style Verlet stickmen (11 points, upright-gravity trick, knee-kick walking, ladder climbing) at 50 Hz.
 - One 2048 × 1536 falling-sand world (underground features at 4× scale) (Powder Toy style): every pixel except the stickmen and the sky is a material; a back-wall layer sits behind it. Only awake 16 × 16 chunks are simulated.
-- Terraria-style rooms: hollow buildings with back walls, doors and platform floors; rooms count by their furniture (beds, bookshelves, cauldrons).
-- A colony of named settlers with roles (miner, builder, woodcutter, scholar, alchemist), pathfinding across the world and up ladders, adapted from the Tower Defense Mine and Library.
+- Terraria-style rooms: hollow buildings with back walls, doors and platform floors; rooms count by their furniture (beds, bookshelves, cauldrons, furnaces, anvils).
+- A colony of named settlers with roles (miner, builder, woodcutter, scholar, alchemist, forge hand, smith), pathfinding across the world and up ladders, adapted from the Tower Defense Mine and Library.
 - Software pixel framebuffer with a camera and light spreading from the sky, torches and fire.
 - Local storage saves, including bounded offline catch-up.
 - Pointer/touch events and optional browser orientation input.
@@ -55,8 +55,9 @@ Node.js 20.19+ or 22.12+ is recommended for the chosen Vite major version. The d
 - **Watch:** The camera follows one stickman (gold marker over their head).
 - **Follow someone else:** Tap a stickman, or pick a name in the side panel's Stickmen list. In `?frame` mode a tap on empty ground switches to the next stickman.
 - **Look around:** Drag the world to pan; after 90 s untouched the camera goes back to following. *Free camera* toggles it.
-- **Jobs:** Each stickman's job can be changed from the list (builder, miner, woodcutter, scholar, alchemist).
+- **Jobs:** Each stickman's job can be changed from the list (builder, miner, woodcutter, scholar, alchemist, forge hand, smith).
 - **Research:** The Alchemy lab section lists what can be researched next; pick one or let the alchemists choose.
+- **Smithy:** The Forge & smithy section shows bars and Smithy points and lists the tools they buy; pick one to save up for or let the smiths choose.
 - **Buildings:** The list shows each room, whether it counts (✓) or why not (✗), the building under construction and how far the mine is dug.
 - **Fling:** Grab a stickman's joint and throw them; they get back up on their own.
 - **Pour:** In the Touch section pick Sand, Water, Fire, Sawdust, Stone, Wood or Erase, then drag on the world. *Look* returns to camera mode.
@@ -72,4 +73,4 @@ Node.js 20.19+ or 22.12+ is recommended for the chosen Vite major version. The d
 
 ## Current scope
 
-A colony in one large world: settlers mine, chop, build cabins and a library, study, research blueprints and improvements, sleep at night, and new settlers arrive when there are beds. The first prototype's fishing, food and monsters are not in this version yet (see the roadmap). Generations, character memory and actual Raspberry Pi sensor wiring are future ideas rather than implemented systems.
+A colony in one large world: settlers mine, chop, build cabins and a library, study, research blueprints and improvements, smelt ore into bars and forge tools, sleep at night, and new settlers arrive when there are beds. The first prototype's fishing, food and monsters are not in this version yet (see the roadmap). Generations, character memory and actual Raspberry Pi sensor wiring are future ideas rather than implemented systems.
