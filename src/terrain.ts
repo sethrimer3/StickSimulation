@@ -162,18 +162,21 @@ export class Terrain {
         if (depth > 3) walls[i] = depth < dirtDepth + 2 * U ? WallKind.DirtWall : WallKind.StoneWall;
       }
     }
-    // Caves: winding passages and big caverns in the stone, kept away from the mine shaft.
+    // Caves: winding passages and big caverns in the stone. Near the mine
+    // shaft they pinch shut (narrower passages, rarer caverns) rather than
+    // stopping at a wall, so only the shaft's own rock is left whole.
     for (let y = 0; y < H - 8; y++) {
       for (let x = 0; x < W; x++) {
         const i = y * W + x;
         const m = cells[i];
         if (m !== Material.Stone && m !== Material.CopperOre && m !== Material.SilverOre) continue;
-        if (Math.abs(x - MINE_X) < 60) continue;
         const depth = y - groundHeight(x, seed);
         if (depth < 45 * U) continue;
+        const open = smooth(Math.min(1, Math.max(0, (Math.abs(x - MINE_X) - 8) / 56)));
+        if (open <= 0) continue;
         const n = noise2(x / (34 * U), y / (16 * U), seed + 41) * 0.65 + noise2(x / (11 * U), y / (9 * U), seed + 43) * 0.35;
-        const cavern = noise2(x / (30 * U), y / (18 * U), seed + 47) > 0.8;
-        if (Math.abs(n - 0.5) < 0.035 || cavern) cells[i] = Material.Empty;
+        const cavern = noise2(x / (30 * U), y / (18 * U), seed + 47) > 1 - 0.2 * open;
+        if (Math.abs(n - 0.5) < 0.035 * open || cavern) cells[i] = Material.Empty;
       }
     }
     // The lake: water over a stone and sand bed, kept topped up by a spring.
